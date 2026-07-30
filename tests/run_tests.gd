@@ -31,6 +31,10 @@ func _initialize() -> void:
 	_test_pixel_font()
 	_test_supabase_config()
 	_test_leaderboard_helpers()
+	_test_power_ups()
+	_test_capsules()
+	_test_special_bricks()
+	_test_schema_mirror()
 	_test_gameplay_soak()
 
 	print("")
@@ -150,6 +154,7 @@ func _test_level_builder() -> void:
 	var seen_cells := {}
 	var hard_blue := 0
 	var hard_gold := 0
+	var special := 0
 	for index in bricks.size():
 		var brick: Dictionary = bricks[index]
 		_eq(int(brick["id"]), index, "id do bloco %d bate com o indice (lookup direto na Arena)" % index)
@@ -170,9 +175,18 @@ func _test_level_builder() -> void:
 			LevelBuilder.TYPE_TJ_GOLD:
 				hard_gold += 1
 				_eq(int(brick["hp"]), 2, "bloco dourado TJ tem 2 hp")
+			LevelBuilder.TYPE_SPECIAL:
+				special += 1
+				_eq(int(brick["hp"]), LevelBuilder.SPECIAL_HP, "bloco especial tem %d hp" % LevelBuilder.SPECIAL_HP)
 
 	_eq(hard_blue, 10, "easter egg: 10 blocos azuis desenham T e J")
 	_eq(hard_gold, 2, "easter egg: 2 blocos dourados")
+	_eq(special, 2, "fase 1 tem 2 blocos especiais fixos")
+
+	# O mapa nunca declara o bloco que surge em jogo: quem o cria e SpecialBricks.
+	for brick in bricks:
+		_check(int(brick["type"]) != LevelBuilder.TYPE_SPECIAL_SPAWNED,
+			"bloco de surgimento nao aparece em mapa")
 
 	# As letras precisam estar onde o mapa promete (linha 2, colunas 2-4 = topo do T).
 	for col in [2, 3, 4]:
@@ -187,7 +201,8 @@ func _test_level_builder() -> void:
 		_check(LevelBuilder.ROW_POINTS[row] > LevelBuilder.ROW_POINTS[row + 1],
 			"fileira %d vale mais que a %d" % [row, row + 1])
 
-	_eq(LevelBuilder.max_base_score(1), 5000, "teto base da fase 1 == 5000 pontos")
+	# 5000 na v1.1.0; os dois 'S' trocaram um bloco de 50 e um de 30 por 150 cada.
+	_eq(LevelBuilder.max_base_score(1), 5220, "teto base da fase 1 == 5220 pontos")
 
 	# Niveis acima do ultimo mapa repetem o ultimo, sem estourar.
 	var high := LevelBuilder.build(99)
@@ -433,7 +448,8 @@ func _test_pixel_font() -> void:
 		"ARKANOIA", "TJ-PR * SECAO SECRETA DE JOGOS", "DIGITE SEU NICK", "JOGAR",
 		"TOP 10 GLOBAL", "NENHUMA PONTUACAO AINDA", "CARREGANDO...",
 		"JOGADOR", "PONTOS", "RECORDE", "FASE", "VIDAS", "COMBO X1.25",
-		"PAUSE", "P PARA CONTINUAR", "TOQUE PARA CONTINUAR",
+		"PAUSE", "CONTINUAR", "SAIR PARA O INICIO",
+		"P OU ESC TAMBEM CONTINUA", "TOQUE EM CONTINUAR",
 		"FIM DE JOGO", "NOVO RECORDE PESSOAL", "JOGAR DE NOVO", "MENU", "ENTER", "ESC",
 		"BOLA PERDIDA", "VIDA RESTANTE", "VIDAS RESTANTES", "FASE 1", "BONUS 1000",
 		"CLIQUE OU ESPACO PARA LANCAR", "TOQUE PARA LANCAR",
@@ -443,6 +459,7 @@ func _test_pixel_font() -> void:
 		"LEADERBOARD NAO CONFIGURADO", "PONTUACAO INVALIDA", "RESPOSTA INVALIDA",
 		"NICK: DE 2 A 10 CARACTERES", "PONTUACAO ZERO NAO E ENVIADA",
 		"ENVIANDO PONTUACAO...", "ANONIMO", "ERRO 500 AO ENVIAR", "FALHA DE REDE (1)",
+		"FALHA AO DESCOMPRIMIR", "FIM",
 		"01 IGOR...... 012500 30/07/26", "--/--/--",
 	]
 	for text in used_strings:
@@ -456,6 +473,15 @@ func _test_pixel_font() -> void:
 		for i in message.length():
 			_check(PixelFont.has_glyph(message[i]),
 				"glifo existe para '%s' (usado em \"%s\")" % [message[i], message])
+
+	# E os rotulos dos power-ups, varridos do catalogo em vez de mantidos a mao:
+	# um nome novo sem glifo quebra o teste sozinho, sem ninguem lembrar de vir aqui.
+	for id in PowerUps.all_ids():
+		var powerup_label := PowerUps.label(str(id))
+		_check(not powerup_label.is_empty(), "power-up '%s' tem rotulo" % id)
+		for i in powerup_label.length():
+			_check(PixelFont.has_glyph(powerup_label[i]),
+				"glifo existe para '%s' (usado no power-up %s)" % [powerup_label[i], id])
 
 	# Metrica de largura.
 	_eq(PixelFont.text_width("", 1), 0, "texto vazio tem largura 0")
@@ -573,6 +599,403 @@ func _test_leaderboard_helpers() -> void:
 
 
 # ============================================================================
+#  PowerUps
+# ============================================================================
+
+func _test_power_ups() -> void:
+	_begin("PowerUps")
+
+	# --- Integridade do catalogo ---
+	for id_variant in PowerUps.all_ids():
+		var id := str(id_variant)
+		_check(PowerUps.exists(id), "power-up '%s' existe" % id)
+		_check(PowerUps.duration(id) >= 0.0, "'%s' tem duracao nao negativa" % id)
+		_check(absf(PowerUps.shade(id)) <= 0.06 + EPS,
+			"'%s' varia o tom em no maximo 6%% (capsulas quase identicas)" % id)
+
+		var rows := PowerUps.sigil(id)
+		_eq(rows.size(), 3, "sigilo de '%s' tem 3 linhas" % id)
+		for row in rows:
+			_eq(str(row).length(), 5, "linha do sigilo de '%s' tem 5 colunas" % id)
+			for i in str(row).length():
+				var ch := str(row)[i]
+				_check(ch == "#" or ch == ".", "sigilo de '%s' so usa # e ." % id)
+
+	# Nenhum sigilo repetido: duas capsulas iguais seriam impossiveis de aprender.
+	var seen_sigils := {}
+	for id_variant in PowerUps.all_ids():
+		var key := "|".join(PackedStringArray(PowerUps.sigil(str(id_variant))))
+		_check(not seen_sigils.has(key), "sigilo de '%s' e unico" % id_variant)
+		seen_sigils[key] = true
+
+	# --- Opostos ---
+	for id_variant in PowerUps.all_ids():
+		var id := str(id_variant)
+		var pair := PowerUps.opposite(id)
+		if pair.is_empty():
+			continue
+		_check(PowerUps.exists(pair), "oposto de '%s' existe no catalogo" % id)
+		_eq(PowerUps.opposite(pair), id, "oposto de '%s' e simetrico" % id)
+
+	# --- Conjunto ativo ---
+	var active := PowerUps.apply({}, PowerUps.WIDE)
+	_eq(active.size(), 1, "apanhar um item ativa um efeito")
+
+	var twice := PowerUps.apply(active, PowerUps.WIDE)
+	_eq(twice.size(), 1, "reapanhar o mesmo item nao empilha")
+	_approx(PowerUps.paddle_width_scale(twice), PowerUps.paddle_width_scale(active), EPS,
+		"reapanhar nao dobra o escalar")
+
+	# Renovar leva o tempo de volta ao cheio, nunca o encurta.
+	var half := {PowerUps.WIDE: 1.0}
+	var renewed := PowerUps.apply(half, PowerUps.WIDE)
+	_approx(float(renewed[PowerUps.WIDE]), PowerUps.duration(PowerUps.WIDE), EPS,
+		"reapanhar renova a duracao")
+
+	var cancelled := PowerUps.apply(PowerUps.apply({}, PowerUps.SLOW), PowerUps.FAST)
+	_check(not cancelled.has(PowerUps.SLOW), "SURTO cancela CALMA")
+	_check(cancelled.has(PowerUps.FAST), "SURTO fica ativo")
+
+	var instant := PowerUps.apply({}, PowerUps.LIFE)
+	_check(instant.is_empty(), "item instantaneo nunca entra no conjunto ativo")
+	_check(PowerUps.is_instant(PowerUps.LIFE), "FOLEGO e instantaneo")
+	_check(not PowerUps.is_instant(PowerUps.WIDE), "LUCIDEZ tem duracao")
+
+	# --- Tick ---
+	var ticked := PowerUps.tick({PowerUps.WIDE: 1.0}, 0.4)
+	_eq(int(ticked["expired"].size()), 0, "efeito com tempo sobrando nao expira")
+	_approx(float(ticked["active"][PowerUps.WIDE]), 0.6, EPS, "tick desconta o delta")
+
+	var done := PowerUps.tick({PowerUps.WIDE: 0.2}, 0.4)
+	_eq(int(done["active"].size()), 0, "efeito esgotado sai do conjunto")
+	_eq(int(done["expired"].size()), 1, "efeito esgotado e anunciado uma unica vez")
+	_eq(str(done["expired"][0]), PowerUps.WIDE, "o id anunciado e o certo")
+
+	var empty := PowerUps.tick({}, 1.0)
+	_eq(int(empty["active"].size()), 0, "tick em conjunto vazio nao inventa efeito")
+	_eq(int(empty["expired"].size()), 0, "tick em conjunto vazio nao anuncia nada")
+
+	# --- Escalares neutros sem efeito ---
+	_approx(PowerUps.paddle_width_scale({}), 1.0, EPS, "sem efeito a raquete tem largura normal")
+	_approx(PowerUps.ball_speed_scale({}), 1.0, EPS, "sem efeito a bola tem velocidade normal")
+	_approx(PowerUps.paddle_axis_sign({}), 1.0, EPS, "sem efeito o controle nao inverte")
+	_eq(PowerUps.risk_level({}), 0, "sem efeito o risco e zero")
+
+	# --- Direcao dos escalares ---
+	_check(PowerUps.paddle_width_scale(PowerUps.apply({}, PowerUps.WIDE)) > 1.0, "LUCIDEZ alarga a raquete")
+	_check(PowerUps.paddle_width_scale(PowerUps.apply({}, PowerUps.NARROW)) < 1.0, "PANICO encurta a raquete")
+	_check(PowerUps.ball_speed_scale(PowerUps.apply({}, PowerUps.SLOW)) < 1.0, "CALMA desacelera a bola")
+	_check(PowerUps.ball_speed_scale(PowerUps.apply({}, PowerUps.FAST)) > 1.0, "SURTO acelera a bola")
+
+	# Os escalares nunca escapam das travas, mesmo com tudo ativo de uma vez.
+	var everything := {}
+	for id_variant in PowerUps.all_ids():
+		everything[str(id_variant)] = 10.0
+	var width := PowerUps.paddle_width_scale(everything)
+	_check(width >= ArenaLayout.PADDLE_MIN_WIDTH_SCALE - EPS and width <= ArenaLayout.PADDLE_MAX_WIDTH_SCALE + EPS,
+		"largura da raquete fica na trava mesmo com tudo ativo (%.2f)" % width)
+	var ball_scale := PowerUps.ball_speed_scale(everything)
+	_check(ball_scale >= PowerUps.SPEED_MIN_SCALE - EPS and ball_scale <= PowerUps.SPEED_MAX_SCALE + EPS,
+		"velocidade da bola fica na trava mesmo com tudo ativo (%.2f)" % ball_scale)
+
+	# --- Risco: itens benignos custam pontos, itens ruins pagam ---
+	_check(PowerUps.risk(PowerUps.WIDE) < 0, "LUCIDEZ tem risco negativo (vantagem custa pontos)")
+	_check(PowerUps.risk(PowerUps.NARROW) > 0, "PANICO tem risco positivo")
+	_check(PowerUps.risk_level(PowerUps.apply(PowerUps.apply({}, PowerUps.WIDE), PowerUps.SLOW)) < 0,
+		"so vantagem deixa o risco negativo")
+
+	# --- A REGRA DO CANAL VISUAL ---
+	# Um efeito visual nao pode tocar em NENHUM escalar da simulacao: ele custa
+	# pontos porque a mao do jogador piora, nao porque a fisica mudou. Sem
+	# sujeitos na v1.2.0; passa a ter na v2.0.0, e e o teste que impede uma
+	# alucinacao de virar trapaca.
+	var visual_count := 0
+	for id_variant in PowerUps.all_ids():
+		var id := str(id_variant)
+		if not PowerUps.is_visual(id):
+			continue
+		visual_count += 1
+		var only := PowerUps.apply({}, id)
+		_approx(PowerUps.paddle_width_scale(only), 1.0, EPS,
+			"efeito visual '%s' nao mexe na largura da raquete" % id)
+		_approx(PowerUps.ball_speed_scale(only), 1.0, EPS,
+			"efeito visual '%s' nao mexe na velocidade da bola" % id)
+		_check(PowerUps.risk(id) > 0,
+			"efeito visual '%s' ainda vale risco (a dificuldade e psicologica)" % id)
+	_eq(visual_count, 0, "v1.2.0 nao tem efeito visual (as alucinacoes vem na v2.0.0)")
+
+	# --- Tabelas de sorteio ---
+	_check(PowerUps.drop_table(LevelBuilder.TYPE_NORMAL).is_empty(), "bloco comum nao solta capsula")
+	_check(PowerUps.drop_table(LevelBuilder.TYPE_TJ_BLUE).is_empty(), "bloco azul TJ nao solta capsula")
+	_check(not PowerUps.drop_table(LevelBuilder.TYPE_SPECIAL).is_empty(), "bloco especial fixo solta capsula")
+	_check(not PowerUps.drop_table(LevelBuilder.TYPE_SPECIAL_SPAWNED).is_empty(), "bloco surgido solta capsula")
+
+	for id_variant in PowerUps.drop_table(LevelBuilder.TYPE_SPECIAL):
+		_eq(PowerUps.tier(str(id_variant)), PowerUps.TIER_COMMON, "bloco fixo so solta item comum")
+	for id_variant in PowerUps.drop_table(LevelBuilder.TYPE_SPECIAL_SPAWNED):
+		_eq(PowerUps.tier(str(id_variant)), PowerUps.TIER_RARE, "bloco surgido so solta item raro")
+
+	# Sorteio reproduzivel: mesma semente, mesma sequencia.
+	var rng_a := RandomNumberGenerator.new()
+	var rng_b := RandomNumberGenerator.new()
+	rng_a.seed = 4242
+	rng_b.seed = 4242
+	for i in 30:
+		_eq(PowerUps.roll_drop(rng_a, LevelBuilder.TYPE_SPECIAL),
+			PowerUps.roll_drop(rng_b, LevelBuilder.TYPE_SPECIAL),
+			"sorteio %d reproduzivel com a mesma semente" % i)
+	_eq(PowerUps.roll_drop(rng_a, LevelBuilder.TYPE_NORMAL), "", "bloco comum sorteia vazio")
+
+	# Ordem da faixa: a do catalogo, nao a de insercao. Sem isso os sigilos
+	# dancariam na tela a cada efeito que expira.
+	var inserted := PowerUps.apply(PowerUps.apply({}, PowerUps.FAST), PowerUps.WIDE)
+	var order_a := PowerUps.ordered_ids(inserted)
+	var reinserted := PowerUps.apply(PowerUps.apply({}, PowerUps.WIDE), PowerUps.FAST)
+	_eq(order_a, PowerUps.ordered_ids(reinserted), "a ordem da faixa nao depende de quem chegou antes")
+
+
+# ============================================================================
+#  Capsules
+# ============================================================================
+
+func _test_capsules() -> void:
+	_begin("Capsules")
+
+	var cases := {
+		"paisagem": Vector2(640, 360),
+		"retrato": Vector2(640, 1385),
+		"ultrawide": Vector2(853, 360),
+		"quadrado": Vector2(700, 700),
+	}
+
+	for label in cases:
+		var layout := ArenaLayout.compute(cases[label])
+		var size := Capsules.size(layout)
+		var speed := Capsules.speed(layout)
+
+		_eq(size.x, Capsules.WIDTH, "%s: largura da capsula e fixa" % label)
+		_check(size.y >= Capsules.MIN_HEIGHT - EPS and size.y <= Capsules.MAX_HEIGHT + EPS,
+			"%s: altura da capsula dentro dos limites (%.1f)" % [label, size.y])
+		_check(speed > 0.0, "%s: capsula cai" % label)
+
+		# A capsula escala com o campo, como a bola: o tempo de queda de ponta a
+		# ponta fica na mesma ordem em qualquer formato.
+		var play: Rect2 = layout["play"]
+		var full_fall := play.size.y / speed
+		_check(full_fall > 2.0 and full_fall < 6.0,
+			"%s: atravessar o campo leva %.1fs (comparavel entre formatos)" % [label, full_fall])
+
+	# --- Coleta ---
+	var layout_base := ArenaLayout.compute(Vector2(640, 360))
+	var play_base: Rect2 = layout_base["play"]
+	var size_base := Capsules.size(layout_base)
+	var speed_base := Capsules.speed(layout_base)
+	var paddle := ArenaLayout.paddle_rect(layout_base, play_base.get_center().x)
+
+	var above := Vector2(paddle.get_center().x, paddle.position.y - 20.0)
+	var caught := Capsules.step([Capsules.make(0, PowerUps.WIDE, above)], 1.0, play_base, paddle, speed_base, size_base)
+	_eq(int(caught["caught"].size()), 1, "capsula que cruza a raquete e apanhada")
+	_eq(str(caught["caught"][0]), PowerUps.WIDE, "o item apanhado e o da capsula")
+	_eq(int(caught["capsules"].size()), 0, "capsula apanhada sai da lista")
+
+	# A REGRESSAO QUE IMPORTA: com dt grande a capsula anda mais que a propria
+	# altura num passo so. Um teste de intersecao simples deixaria passar direto.
+	var far := Vector2(paddle.get_center().x, paddle.position.y - 140.0)
+	var tunnel := Capsules.step([Capsules.make(0, PowerUps.SLOW, far)], 0.5, play_base, paddle, 400.0, size_base)
+	_eq(int(tunnel["caught"].size()), 1, "capsula rapida nao atravessa a raquete (dt = 0.5s)")
+
+	# Fora do alcance horizontal: nao apanha.
+	var aside := Vector2(paddle.position.x - 60.0, paddle.position.y - 20.0)
+	var missed_x := Capsules.step([Capsules.make(0, PowerUps.WIDE, aside)], 1.0, play_base, paddle, speed_base, size_base)
+	_eq(int(missed_x["caught"].size()), 0, "capsula longe da raquete nao e apanhada")
+
+	# Abaixo do campo: perdida.
+	var below := Vector2(paddle.position.x - 60.0, play_base.end.y - 2.0)
+	var missed := Capsules.step([Capsules.make(0, PowerUps.WIDE, below)], 1.0, play_base, paddle, speed_base, size_base)
+	_eq(int(missed["missed"].size()), 1, "capsula que passa do campo e perdida")
+	_eq(int(missed["capsules"].size()), 0, "capsula perdida sai da lista")
+
+	# Uma capsula caindo no meio do campo continua caindo, sem sumir nem duplicar.
+	var mid := Vector2(play_base.get_center().x, play_base.position.y + 40.0)
+	var falling := Capsules.step([Capsules.make(0, PowerUps.WIDE, mid)], 1.0 / 60.0, play_base, paddle, speed_base, size_base)
+	_eq(int(falling["capsules"].size()), 1, "capsula no meio do campo continua caindo")
+	var moved: Vector2 = falling["capsules"][0]["pos"]
+	_check(moved.y > mid.y, "a capsula desce")
+	_approx(moved.x, mid.x, EPS, "a capsula nao deriva de lado")
+
+	# --- Remapeamento ao girar a tela ---
+	var layout_portrait := ArenaLayout.compute(Vector2(640, 1385))
+	var play_portrait: Rect2 = layout_portrait["play"]
+	var to_remap := [
+		Capsules.make(0, PowerUps.WIDE, play_base.position + play_base.size * 0.25),
+		Capsules.make(1, PowerUps.SLOW, play_base.get_center()),
+		Capsules.make(2, PowerUps.FAST, play_base.position + play_base.size * 0.75),
+	]
+	var remapped := Capsules.remap(to_remap, play_base, play_portrait)
+	_eq(int(remapped.size()), 3, "remapear nao perde capsula")
+	for capsule in remapped:
+		var pos: Vector2 = capsule["pos"]
+		_check(play_portrait.grow(1.0).has_point(pos),
+			"capsula remapeada continua dentro do campo novo (%s)" % pos)
+
+
+# ============================================================================
+#  SpecialBricks
+# ============================================================================
+
+func _test_special_bricks() -> void:
+	_begin("SpecialBricks")
+
+	var cases := {
+		"paisagem": Vector2(640, 360),
+		"retrato": Vector2(640, 1385),
+		"ultrawide": Vector2(853, 360),
+		"quadrado": Vector2(700, 700),
+	}
+
+	for label in cases:
+		var layout := ArenaLayout.compute(cases[label])
+		var speed := Capsules.speed(layout)
+		var max_row := SpecialBricks.max_spawn_row(layout, speed)
+		var paddle_y := float(layout["paddle_y"])
+
+		_check(max_row >= ArenaLayout.ROWS - 1,
+			"%s: a parede original e sempre elegivel (row %d)" % [label, max_row])
+		_check(max_row <= ArenaLayout.ROWS - 1 + SpecialBricks.EXTRA_ROWS,
+			"%s: o surgimento nao desce indefinidamente (row %d)" % [label, max_row])
+
+		# A REGRA QUE O USUARIO PEDIU: da fileira mais baixa possivel, a capsula
+		# ainda leva pelo menos MIN_REACTION_SECONDS ate a raquete.
+		var bottom := ArenaLayout.brick_rect(layout, 0, max_row).end.y
+		var reaction := (paddle_y - bottom) / speed
+		_check(reaction >= SpecialBricks.MIN_REACTION_SECONDS - EPS,
+			"%s: da fileira %d sobram %.2fs de reacao" % [label, max_row, reaction])
+
+		# E o limite e JUSTO, nao folgado: a fileira seguinte ou violaria o tempo
+		# de reacao, ou ja esta abaixo do teto de fileiras extras.
+		var next_row := max_row + 1
+		var next_bottom := ArenaLayout.brick_rect(layout, 0, next_row).end.y
+		var next_reaction := (paddle_y - next_bottom) / speed
+		_check(next_reaction < SpecialBricks.MIN_REACTION_SECONDS or next_row > ArenaLayout.ROWS - 1 + SpecialBricks.EXTRA_ROWS,
+			"%s: a fileira %d ja seria apertada demais (%.2fs) ou passa do teto" % [label, next_row, next_reaction])
+
+	# --- Celulas livres ---
+	var layout_base := ArenaLayout.compute(Vector2(640, 360))
+	var bricks := LevelBuilder.build(1)
+	for brick in bricks:
+		brick["alive"] = true
+
+	var max_row_base := SpecialBricks.max_spawn_row(layout_base, Capsules.speed(layout_base))
+	var free := SpecialBricks.free_cells(bricks, max_row_base)
+
+	# A parede da fase 1 e cheia, entao so sobram as fileiras abaixo dela.
+	var expected := (max_row_base + 1 - ArenaLayout.ROWS) * ArenaLayout.COLS
+	_eq(free.size(), expected, "com a parede cheia so as fileiras abaixo estao livres")
+	for cell in free:
+		_check(cell.y >= ArenaLayout.ROWS, "celula livre esta abaixo da parede cheia")
+		_check(cell.y <= max_row_base, "celula livre respeita a altura minima")
+
+	# Ao destruir um bloco, a celula dele fica disponivel.
+	bricks[0]["alive"] = false
+	var free_after := SpecialBricks.free_cells(bricks, max_row_base)
+	_eq(free_after.size(), free.size() + 1, "bloco destruido libera a celula")
+
+	# --- Celula segura ---
+	var cell_rect := ArenaLayout.brick_rect(layout_base, 5, 9)
+	var radius := float(layout_base["ball_radius"])
+
+	_check(not SpecialBricks.is_cell_safe(cell_rect, cell_rect.get_center(), Vector2.ZERO, radius, 0.5),
+		"celula com a bola dentro nao e segura")
+
+	var below_cell := cell_rect.get_center() + Vector2(0.0, 200.0)
+	var towards := Vector2(0.0, -400.0)
+	_check(not SpecialBricks.is_cell_safe(cell_rect, below_cell, towards, radius, SpecialBricks.BALL_LOOKAHEAD),
+		"celula na trajetoria da bola nao e segura")
+	_check(SpecialBricks.is_cell_safe(cell_rect, below_cell, -towards, radius, SpecialBricks.BALL_LOOKAHEAD),
+		"a mesma celula e segura com a bola indo embora")
+
+	# --- pick_cell ---
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 99
+	var far_ball := Vector2(-5000.0, -5000.0)
+	var picked := SpecialBricks.pick_cell(rng, free, layout_base, far_ball, Vector2.ZERO, radius)
+	_check(picked.x >= 0, "com celulas livres e bola longe, sorteia alguma celula")
+	_check(free.has(picked), "a celula sorteada esta entre as livres")
+
+	var none := SpecialBricks.pick_cell(rng, [], layout_base, far_ball, Vector2.ZERO, radius)
+	_eq(none, Vector2i(-1, -1), "sem celula livre devolve (-1,-1)")
+
+	# Determinismo do surgimento.
+	var rng_a := RandomNumberGenerator.new()
+	var rng_b := RandomNumberGenerator.new()
+	rng_a.seed = 7
+	rng_b.seed = 7
+	for i in 20:
+		_approx(SpecialBricks.next_interval(rng_a), SpecialBricks.next_interval(rng_b), EPS,
+			"intervalo %d reproduzivel com a mesma semente" % i)
+		_eq(SpecialBricks.pick_cell(rng_a, free, layout_base, far_ball, Vector2.ZERO, radius),
+			SpecialBricks.pick_cell(rng_b, free, layout_base, far_ball, Vector2.ZERO, radius),
+			"celula %d reproduzivel com a mesma semente" % i)
+
+	var interval := SpecialBricks.next_interval(rng_a)
+	_check(interval >= SpecialBricks.ROLL_INTERVAL_MIN and interval <= SpecialBricks.ROLL_INTERVAL_MAX,
+		"intervalo de sorteio fica na faixa (%.1fs)" % interval)
+
+	# --- make_brick ---
+	# Chave faltando aqui e crash em _draw_brick, entao a forma e verificada
+	# explicitamente contra tudo que a Arena le de um bloco.
+	var spawned := SpecialBricks.make_brick(88, Vector2i(3, 9), layout_base)
+	for key in ["id", "col", "row", "hp", "max_hp", "type", "color", "points", "alive", "flash", "kind", "rect"]:
+		_check(spawned.has(key), "bloco surgido tem a chave '%s'" % key)
+
+	_eq(int(spawned["id"]), 88, "id do bloco surgido e o indice pedido")
+	_eq(int(spawned["type"]), LevelBuilder.TYPE_SPECIAL_SPAWNED, "tipo do bloco surgido")
+	_eq(int(spawned["hp"]), int(spawned["max_hp"]), "bloco surgido comeca inteiro")
+	_check(int(spawned["hp"]) > LevelBuilder.SPECIAL_HP, "bloco surgido aguenta mais que o fixo")
+	_check(int(spawned["points"]) > LevelBuilder.SPECIAL_POINTS, "bloco surgido vale mais que o fixo")
+	_check(bool(spawned["alive"]), "bloco surgido nasce vivo")
+	_eq(int(spawned["kind"]), BallPhysics.KIND_BRICK, "bloco surgido colide como bloco")
+	_eq(Rect2(spawned["rect"]), ArenaLayout.brick_rect(layout_base, 3, 9),
+		"retangulo do bloco surgido vem da mesma geometria da grade")
+
+
+# ============================================================================
+#  Espelho do schema: cliente e servidor nao podem divergir
+# ============================================================================
+
+func _test_schema_mirror() -> void:
+	_begin("Espelho do schema")
+
+	var sql := FileAccess.get_file_as_string("res://supabase/schema.sql")
+	_check(not sql.is_empty(), "supabase/schema.sql e legivel")
+	if sql.is_empty():
+		return
+
+	# O CHECK de plausibilidade e a unica trava que roda no servidor. Se estes
+	# numeros divergirem de ScoreRules, o jogo passa a produzir placares que o
+	# banco recusa - e o jogador so descobre no fim da partida.
+	var plausible := "score <= %d * greatest(duration_ms / 1000, 1) + %d" % [
+		ScoreRules.PLAUSIBLE_POINTS_PER_SECOND, ScoreRules.PLAUSIBLE_BASE
+	]
+	_check(sql.contains(plausible),
+		"CHECK scores_plausible espelha ScoreRules (esperado \"%s\")" % plausible)
+
+	var range_check := "score between 0 and %d" % ScoreRules.MAX_VALID_SCORE
+	_check(sql.contains(range_check),
+		"CHECK scores_score_range espelha MAX_VALID_SCORE (esperado \"%s\")" % range_check)
+
+	# A migracao precisa levar o banco existente ao mesmo lugar do schema novo.
+	var migration := FileAccess.get_file_as_string("res://supabase/migrations/001_teto_plausibilidade.sql")
+	_check(not migration.is_empty(), "a migracao do teto e legivel")
+	_check(migration.contains(plausible), "a migracao chega ao mesmo teto do schema")
+
+	# E um placar realista continua passando com folga.
+	var realistic_seconds := 200
+	_check(ScoreRules.plausible_ceiling(realistic_seconds) > 40000,
+		"uma partida de %ds aceita placares muito acima do que o jogo produz" % realistic_seconds)
+
+
+# ============================================================================
 #  Soak test: partida completa simulada
 # ============================================================================
 
@@ -581,37 +1004,89 @@ func _test_gameplay_soak() -> void:
 
 	for label in ["paisagem", "retrato"]:
 		var viewport := Vector2(640, 360) if label == "paisagem" else Vector2(640, 1385)
-		var run := _simulate_run(viewport, 400.0)
 
-		_eq(int(run["alive"]), 0, "%s: parede inteira foi destruida" % label)
-		_eq(int(run["lost"]), 0, "%s: raquete perfeita nunca perde a bola" % label)
-		_check(bool(run["in_bounds"]), "%s: bola nunca escapou do campo" % label)
-		_check(float(run["elapsed"]) < 400.0, "%s: fase concluida dentro do orcamento (%.1fs)" % [label, run["elapsed"]])
-		_check(int(run["paddle_hits"]) > 0, "%s: a bola voltou a raquete" % label)
-		_check(int(run["score"]) > LevelBuilder.max_base_score(1), "%s: pontuacao supera a base (combo + bonus)" % label)
-		_check(ScoreRules.is_valid_score(int(run["score"])), "%s: pontuacao e enviavel" % label)
+		var runs := {
+			"off": _simulate_run(viewport, 400.0, 20260730, "off"),
+			"catch": _simulate_run(viewport, 400.0, 20260730, "catch"),
+			"dodge": _simulate_run(viewport, 400.0, 20260730, "dodge"),
+		}
 
-		# A partida simulada precisa passar no CHECK de plausibilidade do schema:
-		#   score <= 1200 * greatest(duration_ms/1000, 1) + 5000
-		var duration_seconds := maxi(int(float(run["elapsed"])), 1)
-		var ceiling := 1200 * duration_seconds + 5000
-		_check(int(run["score"]) <= ceiling,
-			"%s: %d pontos em %ds passa no CHECK do schema (teto %d)" % [
-				label, int(run["score"]), duration_seconds, ceiling
+		for policy in runs:
+			var run: Dictionary = runs[policy]
+			var tag := "%s/%s" % [label, policy]
+
+			_eq(int(run["alive"]), 0, "%s: parede inteira foi destruida" % tag)
+			_eq(int(run["lost"]), 0, "%s: raquete perfeita nunca perde a bola" % tag)
+			_check(bool(run["in_bounds"]), "%s: bola e capsulas nunca escaparam do campo" % tag)
+			_check(float(run["elapsed"]) < 400.0, "%s: fase concluida dentro do orcamento (%.1fs)" % [tag, run["elapsed"]])
+			_check(int(run["paddle_hits"]) > 0, "%s: a bola voltou a raquete" % tag)
+			_check(int(run["score"]) > LevelBuilder.max_base_score(1), "%s: pontuacao supera a base" % tag)
+			_check(ScoreRules.is_valid_score(int(run["score"])), "%s: pontuacao e enviavel" % tag)
+
+			# O CHECK de plausibilidade do servidor, lido de ScoreRules em vez de
+			# repetido a mao - o teste do espelho garante que os dois batem.
+			var duration_seconds := maxi(int(float(run["elapsed"])), 1)
+			var ceiling := ScoreRules.plausible_ceiling(duration_seconds)
+			_check(int(run["score"]) <= ceiling,
+				"%s: %d pontos em %ds passa no CHECK do schema (teto %d)" % [
+					tag, int(run["score"]), duration_seconds, ceiling
+				])
+
+			# Guarda de folga: se o teto virar a restricao de balanceamento, o
+			# jogo passa a ser limitado pela trava antifraude sem ninguem notar.
+			var rate := float(run["score"]) / maxf(float(run["elapsed"]), 1.0)
+			_check(rate < float(ScoreRules.PLAUSIBLE_POINTS_PER_SECOND) * 0.25,
+				"%s: %.0f pts/s fica bem abaixo do teto de %d" % [
+					tag, rate, ScoreRules.PLAUSIBLE_POINTS_PER_SECOND
+				])
+
+		# Os power-ups precisam mesmo acontecer, ou os testes acima nao provam nada.
+		var catch_run: Dictionary = runs["catch"]
+		var off_run: Dictionary = runs["off"]
+		_check(int(catch_run["specials"]) > 0, "%s: blocos especiais surgiram durante a partida" % label)
+		_check(int(catch_run["caught"]) > 0, "%s: a raquete apanhou capsulas" % label)
+		_check(int(catch_run["caught"]) > int(runs["dodge"]["caught"]),
+			"%s: apanhar de proposito rende mais capsulas que desviar" % label)
+		_eq(int(off_run["caught"]), 0, "%s: a linha de base nao apanha nada" % label)
+		_check(int(catch_run["score"]) != int(off_run["score"]),
+			"%s: os power-ups mudam o placar" % label)
+
+		# Determinismo: mesma semente, mesma partida.
+		var repeat := _simulate_run(viewport, 400.0, 20260730, "catch")
+		_eq(int(repeat["score"]), int(catch_run["score"]), "%s: mesma semente, mesmo placar" % label)
+		_eq(int(repeat["caught"]), int(catch_run["caught"]), "%s: mesma semente, mesmas capsulas" % label)
+		_eq(int(repeat["specials"]), int(catch_run["specials"]), "%s: mesma semente, mesmos surgimentos" % label)
+
+		for policy in runs:
+			var run: Dictionary = runs[policy]
+			print("    %s/%s: %d pontos, %.1fs, %d rebatidas, combo maximo %d, %d capsulas, %d surgimentos" % [
+				label, policy, int(run["score"]), float(run["elapsed"]),
+				int(run["paddle_hits"]), int(run["max_combo"]),
+				int(run["caught"]), int(run["specials"])
 			])
-
-		print("    %s: %d pontos, %.1fs, %d rebatidas, combo maximo %d" % [
-			label, int(run["score"]), float(run["elapsed"]), int(run["paddle_hits"]), int(run["max_combo"])
-		])
 
 
 ## Simula uma partida usando exatamente a mesma matematica da Arena, com uma
 ## raquete automatica que persegue a bola. Sem nos, sem render, sem SceneTree.
-func _simulate_run(viewport: Vector2, max_seconds: float) -> Dictionary:
+##
+## As chamadas de power-up aqui sao IDENTICAS as da Arena - PowerUps.tick,
+## paddle_width_scale, ball_speed_scale, Capsules.step, SpecialBricks.pick_cell.
+## E isso que faz deste soak uma verificacao de verdade, e nao uma segunda
+## implementacao que pode concordar consigo mesma enquanto o jogo diverge.
+##
+## policy:
+##   "off"   sem power-ups; reproduz a linha de base da v1.1.0
+##   "catch" a raquete desvia para apanhar capsula ao alcance
+##   "dodge" a raquete foge das capsulas, sem deixar a bola cair
+func _simulate_run(viewport: Vector2, max_seconds: float, seed_value: int = 0,
+		policy: String = "off") -> Dictionary:
 	var layout := ArenaLayout.compute(viewport)
 	var play: Rect2 = layout["play"]
 	var radius := float(layout["ball_radius"])
 	var speed_scale := float(layout["speed_scale"])
+
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed_value
 
 	var bricks := LevelBuilder.build(1)
 	for brick in bricks:
@@ -629,6 +1104,19 @@ func _simulate_run(viewport: Vector2, max_seconds: float) -> Dictionary:
 	var lost := 0
 	var in_bounds := true
 
+	var powered := policy != "off"
+	var effects: Dictionary = {}
+	var capsules: Array = []
+	var capsule_serial := 0
+	var caught := 0
+	var specials := 0
+	var special_alive := 0
+	var spawn_timer := SpecialBricks.next_interval(rng)
+	var pending: Dictionary = {}
+
+	var capsule_speed := Capsules.speed(layout)
+	var capsule_size := Capsules.size(layout)
+
 	var paddle_x := play.get_center().x
 	var ball := ArenaLayout.docked_ball_position(layout, paddle_x)
 	var vel := BallPhysics.launch_velocity(ScoreRules.ball_speed_for_level(1) * speed_scale, 0.0)
@@ -641,17 +1129,36 @@ func _simulate_run(viewport: Vector2, max_seconds: float) -> Dictionary:
 	var paddle_max_speed := 900.0 * speed_scale
 
 	while elapsed < max_seconds and alive > 0:
-		# Raquete automatica: persegue o X da bola com velocidade limitada.
+		effects = PowerUps.tick(effects, dt)["active"]
+		var width_scale := PowerUps.paddle_width_scale(effects)
+		var risk := PowerUps.risk_level(effects)
+
+		# Para onde a raquete quer ir. A bola SEMPRE tem prioridade quando esta
+		# perto de chegar: sem isso, perseguir capsula custaria a vida e o teste
+		# passaria a medir a politica em vez do sistema.
+		var goal := ball.x
+		if powered and not capsules.is_empty():
+			var paddle_line := float(layout["paddle_y"])
+			var ball_eta := 999.0
+			if vel.y > 1.0:
+				ball_eta = (paddle_line - ball.y) / vel.y
+			if ball_eta > 0.8:
+				var nearest := _nearest_capsule(capsules, paddle_line, capsule_speed)
+				if not nearest.is_empty():
+					var cx := float(nearest["x"])
+					goal = cx if policy == "catch" else _flee_x(cx, play)
+
 		var previous_x := paddle_x
 		var step := paddle_max_speed * dt
-		paddle_x = clampf(ball.x, paddle_x - step, paddle_x + step)
-		var rect := ArenaLayout.paddle_rect(layout, paddle_x)
+		paddle_x = clampf(goal, paddle_x - step, paddle_x + step)
+		var rect := ArenaLayout.paddle_rect(layout, paddle_x, width_scale)
 		paddle_x = rect.get_center().x
 		paddle_target["rect"] = rect
 		paddle_target["vx"] = (paddle_x - previous_x) / dt
 
 		var speed := ScoreRules.ball_speed_for_level(1) * speed_scale \
-			* ScoreRules.ball_speed_multiplier(destroyed, total)
+			* ScoreRules.ball_speed_multiplier(destroyed, total) \
+			* PowerUps.ball_speed_scale(effects)
 		vel = vel.normalized() * speed
 
 		targets.clear()
@@ -680,7 +1187,59 @@ func _simulate_run(viewport: Vector2, max_seconds: float) -> Dictionary:
 						destroyed += 1
 						combo += 1
 						max_combo = maxi(max_combo, combo)
-						score += ScoreRules.brick_points(int(brick["points"]), combo)
+						score += ScoreRules.brick_points(int(brick["points"]), combo, risk)
+
+						var brick_type := int(brick["type"])
+						if brick_type == LevelBuilder.TYPE_SPECIAL_SPAWNED:
+							special_alive = maxi(special_alive - 1, 0)
+						if powered and capsules.size() < Capsules.MAX_ACTIVE:
+							var item := PowerUps.roll_drop(rng, brick_type)
+							if not item.is_empty():
+								capsules.append(Capsules.make(capsule_serial, item, Rect2(brick["rect"]).get_center()))
+								capsule_serial += 1
+
+		if powered and not capsules.is_empty():
+			var stepped := Capsules.step(capsules, dt, play, rect, capsule_speed, capsule_size)
+			capsules = stepped["capsules"]
+			for item_variant in stepped["caught"]:
+				var item := str(item_variant)
+				caught += 1
+				score += ScoreRules.capsule_points(PowerUps.tier(item), PowerUps.risk_level(effects))
+				if item == PowerUps.BONUS:
+					score += int(round(PowerUps.BONUS_POINTS * ScoreRules.risk_multiplier(PowerUps.risk_level(effects))))
+				effects = PowerUps.apply(effects, item)
+
+			for capsule in capsules:
+				var pos: Vector2 = capsule["pos"]
+				if not play.grow(capsule_size.y).has_point(pos):
+					in_bounds = false
+
+		# Surgimento do bloco especial, com o mesmo aviso previo da Arena.
+		if powered:
+			if not pending.is_empty():
+				pending["timer"] = float(pending["timer"]) - dt
+				if float(pending["timer"]) <= 0.0:
+					var cell: Vector2i = pending["cell"]
+					pending = {}
+					var cell_rect := ArenaLayout.brick_rect(layout, cell.x, cell.y)
+					if SpecialBricks.is_cell_safe(cell_rect, ball, vel, radius, SpecialBricks.BALL_LOOKAHEAD):
+						bricks.append(SpecialBricks.make_brick(bricks.size(), cell, layout))
+						alive += 1
+						special_alive += 1
+						specials += 1
+					else:
+						spawn_timer = SpecialBricks.RETRY_SECONDS
+			elif special_alive < SpecialBricks.MAX_ALIVE and alive >= SpecialBricks.STOP_WHEN_ALIVE_BELOW:
+				spawn_timer -= dt
+				if spawn_timer <= 0.0:
+					var max_row := SpecialBricks.max_spawn_row(layout, capsule_speed)
+					var cells := SpecialBricks.free_cells(bricks, max_row)
+					var cell := SpecialBricks.pick_cell(rng, cells, layout, ball, vel, radius)
+					if cell.x < 0:
+						spawn_timer = SpecialBricks.RETRY_SECONDS
+					else:
+						pending = {"cell": cell, "timer": SpecialBricks.TELEGRAPH_SECONDS}
+						spawn_timer = SpecialBricks.next_interval(rng)
 
 		# A bola pode sair pelo fundo (perda), mas nunca pelos outros tres lados.
 		if ball.x < play.position.x - radius - 1.0 or ball.x > play.end.x + radius + 1.0 \
@@ -690,8 +1249,10 @@ func _simulate_run(viewport: Vector2, max_seconds: float) -> Dictionary:
 		if bool(result["lost"]):
 			lost += 1
 			paddle_x = play.get_center().x
-			ball = ArenaLayout.docked_ball_position(layout, paddle_x)
+			ball = ArenaLayout.docked_ball_position(layout, paddle_x, width_scale)
 			vel = BallPhysics.launch_velocity(speed, 0.0)
+			effects = {}
+			capsules = []
 
 		elapsed += dt
 
@@ -706,7 +1267,30 @@ func _simulate_run(viewport: Vector2, max_seconds: float) -> Dictionary:
 		"paddle_hits": paddle_hits,
 		"max_combo": max_combo,
 		"in_bounds": in_bounds,
+		"caught": caught,
+		"specials": specials,
 	}
+
+
+## Capsula mais proxima de chegar a linha da raquete, ou {} se nenhuma esta perto.
+func _nearest_capsule(capsules: Array, paddle_line: float, fall_speed: float) -> Dictionary:
+	var best := {}
+	var best_eta := 1.2
+	for capsule in capsules:
+		var pos: Vector2 = capsule["pos"]
+		if pos.y > paddle_line:
+			continue
+		var eta := (paddle_line - pos.y) / maxf(fall_speed, 0.001)
+		if eta < best_eta:
+			best_eta = eta
+			best = {"x": pos.x, "eta": eta}
+	return best
+
+
+## Ponto para onde fugir de uma capsula: o lado oposto do campo.
+func _flee_x(capsule_x: float, play: Rect2) -> float:
+	var center := play.get_center().x
+	return play.position.x + 12.0 if capsule_x > center else play.end.x - 12.0
 
 
 # ============================================================================

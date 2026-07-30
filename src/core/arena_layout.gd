@@ -46,6 +46,12 @@ const PADDLE_HEIGHT := 10.0
 const PADDLE_BOTTOM_OFFSET := 24.0
 const BALL_RADIUS := 4.0
 
+## Limites da largura da raquete sob efeito de power-up. Abaixo de 0.62 a raquete
+## fica menor que a bola somada a folga de rebatida e o jogo vira sorteio; acima
+## de 1.70 ela cobre um terco do campo e a fase deixa de exigir mira.
+const PADDLE_MIN_WIDTH_SCALE := 0.62
+const PADDLE_MAX_WIDTH_SCALE := 1.70
+
 ## Escala de velocidade proporcional a altura do campo, para que o tempo de
 ## travessia da bola seja praticamente o mesmo em paisagem e em retrato. O teto
 ## cobre o campo mais alto possivel (MAX_PLAY_HEIGHT / DESIGN_HEIGHT ~= 3.33).
@@ -98,14 +104,33 @@ static func brick_rect(layout: Dictionary, col: int, row: int) -> Rect2:
 	)
 
 ## Retangulo da raquete dado o centro horizontal desejado (ja limitado ao campo).
-static func paddle_rect(layout: Dictionary, center_x: float) -> Rect2:
+##
+## width_scale existe para os power-ups de raquete larga e curta. Ele multiplica a
+## largura ANTES do clamp, entao uma raquete larga encostada na parede continua
+## inteira dentro do campo. Passar a escala em vez de mexer em layout["paddle_size"]
+## e deliberado: o layout e recalculado do zero a cada mudanca de viewport, e
+## qualquer mutacao ali seria silenciosamente perdida ao girar a tela.
+static func paddle_rect(layout: Dictionary, center_x: float, width_scale: float = 1.0) -> Rect2:
 	var play: Rect2 = layout["play"]
 	var size: Vector2 = layout["paddle_size"]
-	var half := size.x * 0.5
+	var width := size.x * clampf(width_scale, PADDLE_MIN_WIDTH_SCALE, PADDLE_MAX_WIDTH_SCALE)
+	var half := width * 0.5
 	var cx := clampf(center_x, play.position.x + half, play.end.x - half)
-	return Rect2(cx - half, float(layout["paddle_y"]), size.x, size.y)
+	return Rect2(cx - half, float(layout["paddle_y"]), width, size.y)
 
 ## Posicao de repouso da bola quando ela esta "encaixada" na raquete.
-static func docked_ball_position(layout: Dictionary, paddle_center_x: float) -> Vector2:
-	var rect := paddle_rect(layout, paddle_center_x)
+static func docked_ball_position(layout: Dictionary, paddle_center_x: float, width_scale: float = 1.0) -> Vector2:
+	var rect := paddle_rect(layout, paddle_center_x, width_scale)
 	return Vector2(rect.position.x + rect.size.x * 0.5, rect.position.y - float(layout["ball_radius"]) - 1.0)
+
+## Reposiciona um valor proporcionalmente ao mudar o campo de lugar ou de tamanho.
+##
+## Mora aqui, e nao na Arena, porque o soak test precisa remapear capsulas sem
+## instanciar um no. Devolve o valor intacto quando o intervalo de origem e
+## degenerado, para nunca produzir NAN ao girar a tela num quadro estranho.
+static func remap_axis(value: float, from_min: float, from_max: float, to_min: float, to_max: float) -> float:
+	var span := from_max - from_min
+	if absf(span) < 0.0001:
+		return to_min
+	var t := (value - from_min) / span
+	return to_min + t * (to_max - to_min)

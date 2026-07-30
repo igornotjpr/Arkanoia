@@ -30,6 +30,12 @@ var run_started_at_ms := 0
 var bricks_destroyed := 0
 var bricks_total := 0
 
+## Semente da partida. Toda aleatoriedade de power-up deriva daqui, para que uma
+## corrida seja reproduzivel: os testes fixam a semente e obtem a mesma sequencia
+## de surgimentos e de sorteios de capsula.
+var run_seed := 0
+var capsules_caught := 0
+
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
@@ -47,6 +53,8 @@ func start_run(player_nick: String) -> void:
 	bricks_destroyed = 0
 	bricks_total = 0
 	run_started_at_ms = Time.get_ticks_msec()
+	run_seed = randi()
+	capsules_caught = 0
 	score_changed.emit(score)
 	lives_changed.emit(lives)
 	level_changed.emit(level)

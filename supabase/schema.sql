@@ -44,11 +44,16 @@ create table if not exists public.scores (
 	constraint scores_level_range check (level between 1 and 9999),
 	constraint scores_duration_range check (duration_ms between 0 and 86400000),
 
-	-- Plausibilidade grosseira: 1200 pontos por segundo de partida, mais uma
+	-- Plausibilidade grosseira: 2400 pontos por segundo de partida, mais uma
 	-- folga inicial. Uma partida excelente fica MUITO abaixo desse teto; um
-	-- placar maximo forjado precisaria alegar ~14 minutos de jogo.
+	-- placar maximo forjado precisaria alegar ~7 minutos de jogo.
+	--
+	-- Estes dois numeros sao espelhados por ScoreRules.PLAUSIBLE_POINTS_PER_SECOND
+	-- e ScoreRules.PLAUSIBLE_BASE. O teste _test_schema_mirror le este arquivo e
+	-- falha se divergirem - a derivacao do 2400 esta em
+	-- supabase/migrations/001_teto_plausibilidade.sql.
 	constraint scores_plausible check (
-		score <= 1200 * greatest(duration_ms / 1000, 1) + 5000
+		score <= 2400 * greatest(duration_ms / 1000, 1) + 20000
 	)
 );
 

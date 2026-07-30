@@ -5,6 +5,7 @@
 ##   '0'-'7'  bloco comum de 1 hp, cor da fileira indicada
 ##   'B'      bloco reforcado azul TJ-PR, 2 hp
 ##   'G'      bloco dourado TJ-PR, 2 hp, pontuacao alta
+##   'S'      bloco especial, 2 hp, solta uma capsula de power-up ao morrer
 ##
 ## A fase 1 desenha discretamente as letras "T" e "J" com blocos reforcados no
 ## meio da parede - o easter egg fica visivel apenas para quem presta atencao.
@@ -18,19 +19,31 @@ const TYPE_NORMAL := 0
 const TYPE_TJ_BLUE := 1
 const TYPE_TJ_GOLD := 2
 
+## Bloco especial declarado no mapa, em posicao fixa desde o inicio da partida.
+const TYPE_SPECIAL := 3
+
+## Bloco especial que materializa durante a fase. Nao aparece em mapa nenhum:
+## quem o cria e SpecialBricks.make_brick, em tempo de jogo.
+const TYPE_SPECIAL_SPAWNED := 4
+
 ## Pontos base por fileira (topo vale mais, como no original).
 const ROW_POINTS: Array[int] = [80, 70, 60, 50, 40, 30, 20, 10]
 
 const TJ_BLUE_POINTS := 120
 const TJ_GOLD_POINTS := 200
 
+const SPECIAL_HP := 2
+const SPECIAL_POINTS := 150
+
+## Os dois 'S' ocupam o lugar de blocos comuns nas pontas, longe das colunas que
+## desenham o "T" e o "J" com blocos reforcados - o easter egg fica intacto.
 const LEVEL_1 := [
 	"00000000000",
 	"11111111111",
 	"22BBB22BB22",
-	"333B3333B33",
+	"S33B3333B33",
 	"444B44BB444",
-	"55555555555",
+	"5555555555S",
 	"6G666666G66",
 	"77777777777",
 ]
@@ -109,6 +122,12 @@ static func build(level: int) -> Array:
 					brick["type"] = TYPE_TJ_GOLD
 					brick["color"] = Palette.TJ_GOLD
 					brick["points"] = TJ_GOLD_POINTS
+				"S":
+					brick["hp"] = SPECIAL_HP
+					brick["max_hp"] = SPECIAL_HP
+					brick["type"] = TYPE_SPECIAL
+					brick["color"] = Palette.SPECIAL
+					brick["points"] = SPECIAL_POINTS
 				_:
 					if symbol.is_valid_int():
 						var color_index := symbol.to_int()

@@ -22,6 +22,23 @@ const LEVEL_CLEAR_BONUS_CAP := 5000
 ## schema SQL no Supabase (ver supabase/schema.sql).
 const MAX_VALID_SCORE := 999999
 
+## Teto de plausibilidade do servidor, espelhado pelo CHECK scores_plausible em
+## supabase/schema.sql. Estas constantes sao a FONTE UNICA: o teste
+## _test_schema_mirror le o SQL e falha se os numeros divergirem. Antes da v1.2.0
+## eles estavam escritos a mao em tres lugares e nada impedia a deriva.
+##
+## A derivacao do 2400 esta em supabase/migrations/001_teto_plausibilidade.sql.
+const PLAUSIBLE_POINTS_PER_SECOND := 2400
+const PLAUSIBLE_BASE := 20000
+
+## Multiplicador de risco dos power-ups. Cada nivel de risco vale 35% a mais.
+const RISK_STEP := 0.35
+const RISK_MULTIPLIER_MIN := 0.80
+const RISK_MULTIPLIER_MAX := 2.50
+
+## Pontos por apanhar uma capsula, por nivel (comum, raro), antes do risco.
+const CAPSULE_POINTS: Array[int] = [120, 300]
+
 
 ## Multiplicador do combo. 0 ou 1 bloco -> 1.0; cresce 0.25 por bloco extra.
 static func combo_multiplier(combo: int) -> float:
@@ -30,9 +47,37 @@ static func combo_multiplier(combo: int) -> float:
 	return minf(1.0 + (combo - 1) * COMBO_STEP, COMBO_MAX)
 
 
-## Pontos concedidos ao destruir um bloco, ja com o combo aplicado.
-static func brick_points(base_points: int, combo: int) -> int:
-	return int(round(base_points * combo_multiplier(combo)))
+## Multiplicador de risco: quem aceita jogar com a raquete curta, a bola rapida ou
+## o campo mentindo ganha mais por bloco.
+##
+## Itens benignos tem risco NEGATIVO, entao acumular so vantagem reduz o que se
+## ganha. E isso que impede LUCIDEZ + CALMA de virar escolha obvia e mantem a
+## decisao de apanhar uma capsula sendo, de fato, uma decisao.
+static func risk_multiplier(risk_level: int) -> float:
+	return clampf(1.0 + risk_level * RISK_STEP, RISK_MULTIPLIER_MIN, RISK_MULTIPLIER_MAX)
+
+
+## Pontos concedidos ao destruir um bloco, ja com o combo e o risco aplicados.
+##
+## Os dois multiplicadores sao independentes de proposito: o combo premia pericia
+## no instante (blocos em sequencia sem tocar a raquete), o risco premia uma
+## decisao assumida que dura a fase inteira.
+static func brick_points(base_points: int, combo: int, risk_level: int = 0) -> int:
+	return int(round(base_points * combo_multiplier(combo) * risk_multiplier(risk_level)))
+
+
+## Pontos por apanhar uma capsula, ja com o risco aplicado. Apanhar uma capsula
+## rara ja estando amaldicoado e a jogada que mais paga no jogo.
+static func capsule_points(tier: int, risk_level: int = 0) -> int:
+	if CAPSULE_POINTS.is_empty():
+		return 0
+	var base := CAPSULE_POINTS[clampi(tier, 0, CAPSULE_POINTS.size() - 1)]
+	return int(round(base * risk_multiplier(risk_level)))
+
+
+## Teto que o servidor aceita para uma partida da duracao informada.
+static func plausible_ceiling(duration_seconds: int) -> int:
+	return PLAUSIBLE_POINTS_PER_SECOND * maxi(duration_seconds, 1) + PLAUSIBLE_BASE
 
 
 ## Pontos concedidos ao apenas trincar um bloco reforcado (sem destruir).

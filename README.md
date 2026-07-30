@@ -7,7 +7,7 @@ global no Supabase.
 **Versão 1: uma fase, gráficos e efeitos completos, lógica testada.** Tiros,
 power-ups e aceleração temporária ficam para etapas seguintes.
 
-Versão atual: **v1.1.0** — o que mudou em cada uma está em [CHANGELOG.md](CHANGELOG.md).
+Versão atual: **v1.2.0** — o que mudou em cada uma está em [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
@@ -34,6 +34,42 @@ A raquete nunca volta sozinha para o meio da tela: ao trocar do mouse para o
 teclado ela parte de onde estava, e continua no lugar a cada vida perdida e a
 cada fase nova. A posição central só vale no começo de uma partida.
 
+### Power-ups
+
+Blocos especiais soltam cápsulas que descem pela tela. A raquete apanha — ou
+desvia, que muitas vezes é a jogada certa.
+
+| Cápsula | Efeito | Risco |
+|---|---|---|
+| **LUCIDEZ** | raquete larga | −1 |
+| **CALMA** | bola lenta | −1 |
+| **FOLEGO** | +1 vida | 0 |
+| **EUFORIA** | pontos instantâneos | 0 |
+| **PANICO** | raquete curta | +2 |
+| **SURTO** | bola rápida | +2 |
+
+Todo item é um estado mental — o cardápio se lê como uma lista de sintomas, e é
+essa a piada do nome do jogo. As alucinações que mexem com a percepção (MIRAGEM,
+VERTIGEM, DERIVA, PARANOIA e companhia) chegam na v2.0.0.
+
+**Risco vira pontos.** Cada nível de risco ativo multiplica o que cada bloco vale,
+até 2,5×. Itens benignos têm risco **negativo**: acumular só vantagem reduz o que
+você ganha, e é isso que impede LUCIDEZ + CALMA de virar escolha óbvia.
+
+**As cápsulas são quase idênticas de propósito.** Mesma cor, mesmo formato, mesmo
+chanfro — o que muda é um sigilo de 5×3 pixels e uma variação de tom de no máximo
+6%, sem relação com o efeito. Uma cápsula mais clara tem a mesma chance de ser
+bênção ou maldição. O que torna isso justo em vez de cruel é a faixa no canto do
+campo desenhar **os mesmos sigilos** enquanto o efeito corre: você apanha, vê o
+sigilo aceso e aprende a associação sem uma linha de tutorial.
+
+**Blocos especiais** vêm de dois lugares. Dois têm posição fixa no mapa (símbolo
+`S`) e soltam itens comuns. Outros **surgem durante a partida**, aguentam três
+batidas, valem mais e soltam os itens raros — sempre com aviso prévio de 0,7 s,
+nunca em cima da bola, e nunca abaixo de uma altura que garanta pelo menos 0,9 s
+de queda. Esse último número é o que faz de apanhar uma escolha e não uma
+emboscada.
+
 ### Progressão
 
 A fase 1 tem 88 blocos em 11×8. Ao limpar a parede, o jogo avança de fase com o
@@ -54,7 +90,10 @@ src/core/               camada pura (sem nós, sem SceneTree) + autoloads
   arena_layout.gd       matemática do layout adaptativo 16:9 <-> 9:16
   ball_physics.gd       integração com sub-passos e resolução AABB
   level_builder.gd      fases a partir de mapas em texto
-  score_rules.gd        pontuação, combo, bônus, velocidade
+  score_rules.gd        pontuação, combo, risco, bônus, velocidade
+  power_ups.gd          catálogo dos itens e aritmética dos efeitos ativos
+  capsules.gd           queda e coleta das cápsulas
+  special_bricks.gd     surgimento do bloco especial e a regra da altura mínima
   nick_util.gd          sanitização do nick
   text_util.gd          formatação de data e placar
   pixel_font.gd         fonte bitmap 5x7 gerada em runtime
@@ -68,6 +107,7 @@ src/game/               arena.gd (gameplay + desenho), fx.gd (partículas)
 src/ui/                 hud, title_screen, pause_overlay, game_over, leaderboard_view
 tests/run_tests.gd      suíte headless
 supabase/schema.sql     schema do leaderboard
+supabase/migrations/    alterações do schema, em ordem
 web/exemplo-embed.html  exemplo de página hospedeira
 ```
 
@@ -275,12 +315,14 @@ Depois embuta na página do TJ-PR seguindo `web/exemplo-embed.html`.
 
 Ordem sugerida, do mais barato ao mais caro:
 
-1. **Rodar `supabase/schema.sql`** — sem isso o leaderboard não funciona.
-2. **Instalar os export templates e gerar o build** — único passo que falta para
-   ter o HTML publicável.
-3. **Power-ups**: tiros, raquete larga, bola lenta, multibola, vida extra. Os
-   blocos já carregam `type`, então soltar power-up ao destruir é natural.
-4. **Mais fases**: adicionar mapas em `LevelBuilder.LEVELS`. O formato é texto de
+1. **Alucinações (v2.0.0)**: MIRAGEM (blocos trocam de lugar só visualmente),
+   VERTIGEM (comandos invertidos), DERIVA (a bola encurva), PARANOIA (bolas
+   fantasma), FANTASMA, DIPLOPIA, BREU. A fundação já está pronta: basta
+   acrescentar entradas no catálogo de `power_ups.gd` e trocar `Arena._visual_rect`,
+   hoje uma função identidade, pela permutação.
+2. **Mais fases**: adicionar mapas em `LevelBuilder.LEVELS`. O formato é texto de
    11×8 e a suíte já valida qualquer fase nova.
-5. **Edge Function de validação** (seção 4 acima).
-6. **Música de fundo** em loop, sintetizada como os efeitos.
+3. **Multibola e laser**: exigem refatorar a `Arena`, que hoje tem uma única
+   `_ball_pos`. É refatoração, não power-up — por isso ficaram de fora da v1.2.0.
+4. **Edge Function de validação** (seção 4 acima).
+5. **Música de fundo** em loop, sintetizada como os efeitos.

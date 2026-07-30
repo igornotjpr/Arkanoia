@@ -24,9 +24,17 @@ enum Screen { TITLE, PLAYING, GAME_OVER }
 ## processamento, e com o relogio acelerado a chamada ao Supabase expira antes de
 ## qualquer resposta chegar.
 const SELFTEST_FLAG := "--arkanoia-selftest"
-const SELFTEST_PLAY_SECONDS := 8.0
+
+## Precisa cobrir o primeiro sorteio de bloco especial mais o aviso previo, ou o
+## autoteste nunca exercitaria os power-ups. Com SELFTEST_SEED o primeiro
+## intervalo e de 12,1s; 16s dao folga para o intro e para o aviso.
+const SELFTEST_PLAY_SECONDS := 16.0
 const SELFTEST_TIMEOUT := 90.0
 const SELFTEST_SETTLE_SECONDS := 6.0
+
+## Semente fixa: sem ela o surgimento seria sorteado a cada execucao e o
+## autoteste falharia de vez em quando, que e a pior especie de teste.
+const SELFTEST_SEED := 31337
 
 var _game_root: Node2D
 var _arena: Arena
@@ -192,6 +200,9 @@ func _begin_selftest() -> void:
 	print("=== ARKANOIA :: AUTOTESTE DE INTEGRACAO ===")
 	print("viewport: %s" % get_viewport().get_visible_rect().size)
 	_start_run("SELFTEST")
+	# start_run sorteia a semente; aqui ela e fixada, depois.
+	GameState.run_seed = SELFTEST_SEED
+	_arena.start_level()
 	_arena.autopilot = true
 	_arena.life_lost.connect(func(left: int) -> void:
 		_selftest_events.append("vida perdida, restam %d" % left))
@@ -240,6 +251,8 @@ func _finish_selftest(reached_game_over: bool) -> void:
 		problems.append("pontuacao %d fora da faixa enviavel" % GameState.score)
 	if GameState.best_score < GameState.score:
 		problems.append("recorde local nao foi atualizado")
+	if _arena != null and _arena.specials_spawned == 0:
+		problems.append("nenhum bloco especial surgiu em %.0fs de jogo" % SELFTEST_PLAY_SECONDS)
 
 	print("")
 	for event in _selftest_events:
@@ -248,6 +261,8 @@ func _finish_selftest(reached_game_over: bool) -> void:
 	print("  pontuacao final ...... %d" % GameState.score)
 	print("  fase alcancada ....... %d" % GameState.level)
 	print("  blocos destruidos .... %d de %d" % [GameState.bricks_destroyed, GameState.bricks_total])
+	print("  blocos especiais ..... %d surgiram" % (_arena.specials_spawned if _arena != null else 0))
+	print("  capsulas apanhadas ... %d" % (_arena.capsules_caught if _arena != null else 0))
 	print("  duracao .............. %.1fs" % GameState.run_duration_seconds())
 	print("  leaderboard .......... %s" % (
 		"%d linhas recebidas" % Leaderboard.cached_rows.size() if Leaderboard.last_error.is_empty()

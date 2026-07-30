@@ -110,6 +110,16 @@ func _build_streams() -> void:
 	_streams["ui_type"] = _tone(0.025, 880.0, 880.0, WAVE_SQUARE, 0.22, 0.125)
 	_streams["ui_back"] = _tone(0.07, 400.0, 260.0, WAVE_SQUARE, 0.35, 0.5)
 
+	# Varredura ascendente: o unico aviso inconfundivel de "vem coisa ai".
+	_streams["special_spawn"] = _tone(0.22, 180.0, 620.0, WAVE_TRIANGLE, 0.45, 0.5)
+	_streams["capsule_drop"] = _tone(0.05, 900.0, 640.0, WAVE_SQUARE, 0.30, 0.125)
+	_streams["effect_end"] = _tone(0.10, 480.0, 260.0, WAVE_TRIANGLE, 0.35, 0.5)
+
+	# UM som para toda capsula apanhada. Se houvesse um para item bom e outro
+	# para item ruim, o audio entregaria a capsula numa unica sessao e a mecanica
+	# das capsulas quase identicas morreria. Quem revela o efeito e o popup.
+	_streams["capsule_catch"] = _tone(0.09, 520.0, 880.0, WAVE_SQUARE, 0.50, 0.5)
+
 	_streams["ui_confirm"] = _sequence([
 		{"freq": 660.0, "duration": 0.05},
 		{"freq": 990.0, "duration": 0.08},

@@ -24,6 +24,20 @@ const TEXT := Color(0.957, 0.957, 0.973)        # #F4F4F8
 const TEXT_DIM := Color(0.416, 0.392, 0.533)    # #6A6488
 const TEXT_ACCENT := Color(0.941, 0.784, 0.282) # #F0C848
 
+# --- Blocos especiais e capsulas ---------------------------------------------
+const SPECIAL := Color(0.541, 0.451, 0.784)        # bloco que solta power-up
+const SPECIAL_LIGHT := Color(0.720, 0.647, 0.910)
+const SPAWN_TELEGRAPH := Color(0.941, 0.784, 0.282) # contorno do aviso previo
+
+## TODAS as capsulas usam esta mesma base. O que distingue uma da outra e o
+## sigilo de 5x3 pixels e uma variacao de tom de no maximo 6%, sem relacao com o
+## efeito: a confusao e intencional, e so quem decora os sigilos passa a acertar.
+##
+## O tom e um osso quente, deliberadamente distante do azul frio da raquete e do
+## branco da bola - uma capsula nunca se perde contra o que esta prestes a toca-la.
+const CAPSULE := Color(0.839, 0.796, 0.643)
+const CAPSULE_SIGIL := Color(0.180, 0.145, 0.106)
+
 # --- Acentos TJ-PR -----------------------------------------------------------
 const TJ_BLUE := Color(0.122, 0.306, 0.612)     # #1F4E9C
 const TJ_BLUE_LIGHT := Color(0.259, 0.478, 0.804)
