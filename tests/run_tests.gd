@@ -706,9 +706,8 @@ func _test_power_ups() -> void:
 
 	# --- A REGRA DO CANAL VISUAL ---
 	# Um efeito visual nao pode tocar em NENHUM escalar da simulacao: ele custa
-	# pontos porque a mao do jogador piora, nao porque a fisica mudou. Sem
-	# sujeitos na v1.2.0; passa a ter na v2.0.0, e e o teste que impede uma
-	# alucinacao de virar trapaca.
+	# pontos porque a mao do jogador piora, nao porque a fisica mudou. E este o
+	# teste que impede uma alucinacao de virar trapaca.
 	var visual_count := 0
 	for id_variant in PowerUps.all_ids():
 		var id := str(id_variant)
@@ -720,9 +719,81 @@ func _test_power_ups() -> void:
 			"efeito visual '%s' nao mexe na largura da raquete" % id)
 		_approx(PowerUps.ball_speed_scale(only), 1.0, EPS,
 			"efeito visual '%s' nao mexe na velocidade da bola" % id)
+		_approx(PowerUps.paddle_axis_sign(only), 1.0, EPS,
+			"efeito visual '%s' nao inverte o controle" % id)
 		_check(PowerUps.risk(id) > 0,
 			"efeito visual '%s' ainda vale risco (a dificuldade e psicologica)" % id)
-	_eq(visual_count, 0, "v1.2.0 nao tem efeito visual (as alucinacoes vem na v2.0.0)")
+	_check(visual_count >= 5, "o cardapio tem alucinacoes de verdade (%d no canal visual)" % visual_count)
+
+	# VERTIGEM e a UNICA alucinacao que mexe na simulacao, e por isso vive no
+	# canal de jogo em vez do visual.
+	_check(not PowerUps.is_visual(PowerUps.MIRROR), "VERTIGEM esta no canal de jogo")
+	_approx(PowerUps.paddle_axis_sign(PowerUps.apply({}, PowerUps.MIRROR)), -1.0, EPS,
+		"VERTIGEM inverte o eixo de controle")
+	_approx(PowerUps.paddle_axis_sign(PowerUps.apply(PowerUps.apply({}, PowerUps.MIRROR), PowerUps.WIDE)), -1.0, EPS,
+		"outro efeito junto nao desfaz a inversao")
+
+	# --- MIRAGEM: a permutacao precisa ser BIJECAO ---
+	# Sem bijecao, dois blocos cairiam na mesma celula, um sumiria, e a mentira
+	# seria obvia no primeiro quadro.
+	var shuffle_rng := RandomNumberGenerator.new()
+	shuffle_rng.seed = 31337
+	var alive_ids := [3, 8, 15, 22, 47, 61]
+	var mapping := PowerUps.shuffle_map(alive_ids, shuffle_rng)
+
+	_eq(mapping.size(), alive_ids.size(), "a permutacao cobre todo bloco vivo")
+	var hit := {}
+	for id_variant in alive_ids:
+		_check(mapping.has(id_variant), "bloco %s tem destino na permutacao" % id_variant)
+		var destination: Variant = mapping[id_variant]
+		_check(alive_ids.has(destination), "destino %s e um bloco vivo" % destination)
+		_check(not hit.has(destination), "destino %s aparece uma unica vez (bijecao)" % destination)
+		hit[destination] = true
+	_eq(hit.size(), alive_ids.size(), "nenhum bloco fica sem ser desenhado")
+
+	var rng_x := RandomNumberGenerator.new()
+	var rng_y := RandomNumberGenerator.new()
+	rng_x.seed = 5
+	rng_y.seed = 5
+	_eq(PowerUps.shuffle_map(alive_ids, rng_x), PowerUps.shuffle_map(alive_ids, rng_y),
+		"a permutacao e reproduzivel com a mesma semente")
+	_eq(PowerUps.shuffle_map([], shuffle_rng).size(), 0, "parede vazia permuta para nada")
+	_eq(PowerUps.shuffle_map([7], shuffle_rng), {7: 7}, "bloco unico so pode mapear em si mesmo")
+
+	# --- DERIVA: a curva oscila, nao acumula ---
+	# A integral sobre um periodo completo tem que ser ~0, senao a bola sairia
+	# derivando num sentido so e acabaria orbitando a raquete para sempre - a
+	# mesma classe de defeito que MIN_PADDLE_ANGLE existe para evitar.
+	var period := TAU / PowerUps.CURVE_FREQUENCY
+	var samples := 2000
+	var sample_dt := period / float(samples)
+	var integral := 0.0
+	var peak := 0.0
+	for i in samples:
+		var phase := float(i) * sample_dt
+		integral += PowerUps.curve_rotation(phase, sample_dt)
+		peak = maxf(peak, absf(PowerUps.curve_rotation(phase, 1.0)))
+	_approx(integral, 0.0, 0.001, "a rotacao da DERIVA soma zero num periodo (%.5f)" % integral)
+	_approx(peak, PowerUps.CURVE_AMPLITUDE, 0.01, "o pico da curva bate com a amplitude")
+	_eq(PowerUps.curve_rotation(0.0, 1.0), 0.0, "a curva comeca neutra")
+
+	# --- CISAO: bolas irmas em leque simetrico ---
+	var base_vel := Vector2(0.0, -240.0)
+	var extras := PowerUps.split_velocities(base_vel, PowerUps.SPLIT_COUNT - 1, PowerUps.SPLIT_SPREAD)
+	_eq(extras.size(), PowerUps.SPLIT_COUNT - 1,
+		"CISAO gera as irmas que faltam para %d bolas" % PowerUps.SPLIT_COUNT)
+
+	var sum_vel := base_vel
+	for extra in extras:
+		var extra_vel: Vector2 = extra
+		_approx(extra_vel.length(), base_vel.length(), 1.0, "bola irma mantem a velocidade da original")
+		_check(extra_vel.y < 0.0, "bola irma continua subindo")
+		sum_vel += extra_vel
+	# Leque simetrico: a divisao nao pode empurrar o conjunto para um dos lados.
+	_approx(sum_vel.x, 0.0, 1.0, "o leque da CISAO e simetrico (soma em x = %.2f)" % sum_vel.x)
+
+	_eq(PowerUps.split_velocities(Vector2.ZERO, 2, 0.4).size(), 0, "bola parada nao se divide")
+	_eq(PowerUps.split_velocities(base_vel, 0, 0.4).size(), 0, "dividir em zero nao gera bola")
 
 	# --- Tabelas de sorteio ---
 	_check(PowerUps.drop_table(LevelBuilder.TYPE_NORMAL).is_empty(), "bloco comum nao solta capsula")
@@ -917,12 +988,13 @@ func _test_special_bricks() -> void:
 	# --- pick_cell ---
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 99
-	var far_ball := Vector2(-5000.0, -5000.0)
-	var picked := SpecialBricks.pick_cell(rng, free, layout_base, far_ball, Vector2.ZERO, radius)
+	# Uma bola bem longe do campo: nenhuma celula fica bloqueada por ela.
+	var far_balls := [{"pos": Vector2(-5000.0, -5000.0), "vel": Vector2.ZERO}]
+	var picked := SpecialBricks.pick_cell(rng, free, layout_base, far_balls, radius)
 	_check(picked.x >= 0, "com celulas livres e bola longe, sorteia alguma celula")
 	_check(free.has(picked), "a celula sorteada esta entre as livres")
 
-	var none := SpecialBricks.pick_cell(rng, [], layout_base, far_ball, Vector2.ZERO, radius)
+	var none := SpecialBricks.pick_cell(rng, [], layout_base, far_balls, radius)
 	_eq(none, Vector2i(-1, -1), "sem celula livre devolve (-1,-1)")
 
 	# Determinismo do surgimento.
@@ -933,8 +1005,8 @@ func _test_special_bricks() -> void:
 	for i in 20:
 		_approx(SpecialBricks.next_interval(rng_a), SpecialBricks.next_interval(rng_b), EPS,
 			"intervalo %d reproduzivel com a mesma semente" % i)
-		_eq(SpecialBricks.pick_cell(rng_a, free, layout_base, far_ball, Vector2.ZERO, radius),
-			SpecialBricks.pick_cell(rng_b, free, layout_base, far_ball, Vector2.ZERO, radius),
+		_eq(SpecialBricks.pick_cell(rng_a, free, layout_base, far_balls, radius),
+			SpecialBricks.pick_cell(rng_b, free, layout_base, far_balls, radius),
 			"celula %d reproduzivel com a mesma semente" % i)
 
 	var interval := SpecialBricks.next_interval(rng_a)
@@ -1057,6 +1129,50 @@ func _test_gameplay_soak() -> void:
 		_eq(int(repeat["caught"]), int(catch_run["caught"]), "%s: mesma semente, mesmas capsulas" % label)
 		_eq(int(repeat["specials"]), int(catch_run["specials"]), "%s: mesma semente, mesmos surgimentos" % label)
 
+		# ------------------------------------------------------------------
+		# A PROVA DE QUE AS ALUCINACOES NAO SAO TRAPACA
+		# ------------------------------------------------------------------
+		# Forcando cada efeito do canal visual por uma partida inteira, a FISICA
+		# tem que sair identica a da partida sem ele: mesmo tempo, mesmas
+		# rebatidas, mesmo combo, mesma parede. Se um dia alguem ler um efeito
+		# visual dentro de _simulate_balls ou de _update_paddle, este teste cai.
+		#
+		# A pontuacao NAO entra na comparacao de proposito: o risco multiplica
+		# pontos, e e assim que a alucinacao paga o preco de atrapalhar.
+		var clean := _simulate_run(viewport, 400.0, 20260730, "off")
+		for id_variant in PowerUps.all_ids():
+			var id := str(id_variant)
+			if not PowerUps.is_visual(id):
+				continue
+			var hallucinated := _simulate_run(viewport, 400.0, 20260730, "off", id)
+			var tag := "%s/%s" % [label, id]
+			_approx(float(hallucinated["elapsed"]), float(clean["elapsed"]), EPS,
+				"%s: a alucinacao nao muda a duracao da partida" % tag)
+			_eq(int(hallucinated["paddle_hits"]), int(clean["paddle_hits"]),
+				"%s: a alucinacao nao muda as rebatidas" % tag)
+			_eq(int(hallucinated["max_combo"]), int(clean["max_combo"]),
+				"%s: a alucinacao nao muda o combo" % tag)
+			_eq(int(hallucinated["alive"]), int(clean["alive"]),
+				"%s: a alucinacao nao muda a parede" % tag)
+			_eq(int(hallucinated["lost"]), int(clean["lost"]),
+				"%s: a alucinacao nao faz perder bola" % tag)
+
+		# Controle: um efeito do canal de JOGO precisa mudar a fisica, ou o teste
+		# acima passaria mesmo com o sistema inteiro quebrado.
+		var slowed := _simulate_run(viewport, 400.0, 20260730, "off", PowerUps.SLOW)
+		_check(absf(float(slowed["elapsed"]) - float(clean["elapsed"])) > 1.0,
+			"%s: CALMA (canal de jogo) muda a partida de verdade" % label)
+
+		# CISAO: semente escolhida por ir ate o TETO de bolas em paisagem, para o
+		# refactor de multiplas bolas nao ficar sem cobertura no soak.
+		var multi := _simulate_run(viewport, 400.0, 512, "catch")
+		_check(int(multi["max_balls"]) > 1,
+			"%s: CISAO colocou %d bolas em jogo" % [label, int(multi["max_balls"])])
+		_check(int(multi["max_balls"]) <= PowerUps.MAX_BALLS,
+			"%s: a multibola respeita o teto de %d" % [label, PowerUps.MAX_BALLS])
+		_eq(int(multi["alive"]), 0, "%s: a parede cai tambem com varias bolas" % label)
+		_check(bool(multi["in_bounds"]), "%s: nenhuma bola escapou do campo com CISAO" % label)
+
 		for policy in runs:
 			var run: Dictionary = runs[policy]
 			print("    %s/%s: %d pontos, %.1fs, %d rebatidas, combo maximo %d, %d capsulas, %d surgimentos" % [
@@ -1064,6 +1180,9 @@ func _test_gameplay_soak() -> void:
 				int(run["paddle_hits"]), int(run["max_combo"]),
 				int(run["caught"]), int(run["specials"])
 			])
+		print("    %s/cisao: %d bolas simultaneas, %d capsulas" % [
+			label, int(multi["max_balls"]), int(multi["caught"])
+		])
 
 
 ## Simula uma partida usando exatamente a mesma matematica da Arena, com uma
@@ -1078,8 +1197,10 @@ func _test_gameplay_soak() -> void:
 ##   "off"   sem power-ups; reproduz a linha de base da v1.1.0
 ##   "catch" a raquete desvia para apanhar capsula ao alcance
 ##   "dodge" a raquete foge das capsulas, sem deixar a bola cair
+## forced: id de efeito mantido permanentemente ativo, para provar que uma
+##         alucinacao do canal visual nao altera a simulacao em nada.
 func _simulate_run(viewport: Vector2, max_seconds: float, seed_value: int = 0,
-		policy: String = "off") -> Dictionary:
+		policy: String = "off", forced: String = "") -> Dictionary:
 	var layout := ArenaLayout.compute(viewport)
 	var play: Rect2 = layout["play"]
 	var radius := float(layout["ball_radius"])
@@ -1118,8 +1239,13 @@ func _simulate_run(viewport: Vector2, max_seconds: float, seed_value: int = 0,
 	var capsule_size := Capsules.size(layout)
 
 	var paddle_x := play.get_center().x
-	var ball := ArenaLayout.docked_ball_position(layout, paddle_x)
-	var vel := BallPhysics.launch_velocity(ScoreRules.ball_speed_for_level(1) * speed_scale, 0.0)
+	var launch_speed := ScoreRules.ball_speed_for_level(1) * speed_scale
+	var balls: Array = [{
+		"pos": ArenaLayout.docked_ball_position(layout, paddle_x),
+		"vel": BallPhysics.launch_velocity(launch_speed, 0.0),
+		"phase": 0.0,
+	}]
+	var max_balls := 1
 
 	var paddle_target := {"rect": Rect2(), "id": "paddle", "kind": BallPhysics.KIND_PADDLE, "vx": 0.0}
 	var targets: Array = []
@@ -1130,18 +1256,27 @@ func _simulate_run(viewport: Vector2, max_seconds: float, seed_value: int = 0,
 
 	while elapsed < max_seconds and alive > 0:
 		effects = PowerUps.tick(effects, dt)["active"]
+		if not forced.is_empty():
+			effects[forced] = 999.0
 		var width_scale := PowerUps.paddle_width_scale(effects)
 		var risk := PowerUps.risk_level(effects)
+		var curving := effects.has(PowerUps.CURVE)
 
-		# Para onde a raquete quer ir. A bola SEMPRE tem prioridade quando esta
-		# perto de chegar: sem isso, perseguir capsula custaria a vida e o teste
-		# passaria a medir a politica em vez do sistema.
-		var goal := ball.x
+		# A raquete persegue a bola MAIS BAIXA: com CISAO ativa, e a que esta
+		# prestes a cair que decide se a jogada sobrevive.
+		var lowest := _lowest_ball(balls)
+		var lowest_pos: Vector2 = lowest["pos"]
+		var lowest_vel: Vector2 = lowest["vel"]
+
+		# A bola SEMPRE tem prioridade quando esta perto de chegar: sem isso,
+		# perseguir capsula custaria a vida e o teste passaria a medir a politica
+		# em vez do sistema.
+		var goal := lowest_pos.x
 		if powered and not capsules.is_empty():
 			var paddle_line := float(layout["paddle_y"])
 			var ball_eta := 999.0
-			if vel.y > 1.0:
-				ball_eta = (paddle_line - ball.y) / vel.y
+			if lowest_vel.y > 1.0:
+				ball_eta = (paddle_line - lowest_pos.y) / lowest_vel.y
 			if ball_eta > 0.8:
 				var nearest := _nearest_capsule(capsules, paddle_line, capsule_speed)
 				if not nearest.is_empty():
@@ -1159,44 +1294,67 @@ func _simulate_run(viewport: Vector2, max_seconds: float, seed_value: int = 0,
 		var speed := ScoreRules.ball_speed_for_level(1) * speed_scale \
 			* ScoreRules.ball_speed_multiplier(destroyed, total) \
 			* PowerUps.ball_speed_scale(effects)
-		vel = vel.normalized() * speed
 
-		targets.clear()
-		targets.append(paddle_target)
-		for brick in bricks:
-			if brick["alive"]:
-				targets.append(brick)
+		var survivors: Array = []
+		for ball in balls:
+			var vel: Vector2 = ball["vel"]
+			vel = vel.normalized() * speed
+			if curving:
+				ball["phase"] = float(ball["phase"]) + dt
+				vel = BallPhysics.enforce_min_vertical(
+					vel.rotated(PowerUps.curve_rotation(float(ball["phase"]), dt))
+				)
 
-		var result := BallPhysics.advance(ball, vel, radius, dt, play, targets)
-		ball = result["pos"]
-		vel = result["vel"]
+			# Alvos remontados POR BOLA, como na Arena: o mapa "consumed" do
+			# BallPhysics vale por chamada, e sem remontar duas bolas cobrariam o
+			# mesmo bloco no mesmo quadro.
+			targets.clear()
+			targets.append(paddle_target)
+			for brick in bricks:
+				if brick["alive"]:
+					targets.append(brick)
 
-		for event in result["events"]:
-			match str(event["type"]):
-				"paddle":
-					paddle_hits += 1
-					combo = 0
-				"brick":
-					var brick: Dictionary = bricks[int(event["id"])]
-					brick["hp"] = int(brick["hp"]) - 1
-					if int(brick["hp"]) > 0:
-						score += ScoreRules.chip_points(int(brick["points"]))
-					else:
-						brick["alive"] = false
-						alive -= 1
-						destroyed += 1
-						combo += 1
-						max_combo = maxi(max_combo, combo)
-						score += ScoreRules.brick_points(int(brick["points"]), combo, risk)
+			var result := BallPhysics.advance(ball["pos"], vel, radius, dt, play, targets)
+			ball["pos"] = result["pos"]
+			ball["vel"] = result["vel"]
 
-						var brick_type := int(brick["type"])
-						if brick_type == LevelBuilder.TYPE_SPECIAL_SPAWNED:
-							special_alive = maxi(special_alive - 1, 0)
-						if powered and capsules.size() < Capsules.MAX_ACTIVE:
-							var item := PowerUps.roll_drop(rng, brick_type)
-							if not item.is_empty():
-								capsules.append(Capsules.make(capsule_serial, item, Rect2(brick["rect"]).get_center()))
-								capsule_serial += 1
+			for event in result["events"]:
+				match str(event["type"]):
+					"paddle":
+						paddle_hits += 1
+						combo = 0
+					"brick":
+						var brick: Dictionary = bricks[int(event["id"])]
+						brick["hp"] = int(brick["hp"]) - 1
+						if int(brick["hp"]) > 0:
+							score += ScoreRules.chip_points(int(brick["points"]))
+						else:
+							brick["alive"] = false
+							alive -= 1
+							destroyed += 1
+							combo += 1
+							max_combo = maxi(max_combo, combo)
+							score += ScoreRules.brick_points(int(brick["points"]), combo, risk)
+
+							var brick_type := int(brick["type"])
+							if brick_type == LevelBuilder.TYPE_SPECIAL_SPAWNED:
+								special_alive = maxi(special_alive - 1, 0)
+							if powered and capsules.size() < Capsules.MAX_ACTIVE:
+								var item := PowerUps.roll_drop(rng, brick_type)
+								if not item.is_empty():
+									capsules.append(Capsules.make(capsule_serial, item, Rect2(brick["rect"]).get_center()))
+									capsule_serial += 1
+
+			var ball_pos: Vector2 = ball["pos"]
+			if ball_pos.x < play.position.x - radius - 1.0 or ball_pos.x > play.end.x + radius + 1.0 \
+					or ball_pos.y < play.position.y - radius - 1.0:
+				in_bounds = false
+
+			if not bool(result["lost"]):
+				survivors.append(ball)
+
+		balls = survivors
+		max_balls = maxi(max_balls, balls.size())
 
 		if powered and not capsules.is_empty():
 			var stepped := Capsules.step(capsules, dt, play, rect, capsule_speed, capsule_size)
@@ -1207,6 +1365,14 @@ func _simulate_run(viewport: Vector2, max_seconds: float, seed_value: int = 0,
 				score += ScoreRules.capsule_points(PowerUps.tier(item), PowerUps.risk_level(effects))
 				if item == PowerUps.BONUS:
 					score += int(round(PowerUps.BONUS_POINTS * ScoreRules.risk_multiplier(PowerUps.risk_level(effects))))
+				elif item == PowerUps.MULTI:
+					var spawned: Array = []
+					for ball in balls:
+						for extra in PowerUps.split_velocities(ball["vel"], PowerUps.SPLIT_COUNT - 1, PowerUps.SPLIT_SPREAD):
+							if balls.size() + spawned.size() < PowerUps.MAX_BALLS:
+								spawned.append({"pos": Vector2(ball["pos"]), "vel": extra, "phase": 0.0})
+					balls.append_array(spawned)
+					max_balls = maxi(max_balls, balls.size())
 				effects = PowerUps.apply(effects, item)
 
 			for capsule in capsules:
@@ -1222,7 +1388,7 @@ func _simulate_run(viewport: Vector2, max_seconds: float, seed_value: int = 0,
 					var cell: Vector2i = pending["cell"]
 					pending = {}
 					var cell_rect := ArenaLayout.brick_rect(layout, cell.x, cell.y)
-					if SpecialBricks.is_cell_safe(cell_rect, ball, vel, radius, SpecialBricks.BALL_LOOKAHEAD):
+					if SpecialBricks.is_cell_safe_for_all(cell_rect, balls, radius, SpecialBricks.BALL_LOOKAHEAD):
 						bricks.append(SpecialBricks.make_brick(bricks.size(), cell, layout))
 						alive += 1
 						special_alive += 1
@@ -1234,23 +1400,22 @@ func _simulate_run(viewport: Vector2, max_seconds: float, seed_value: int = 0,
 				if spawn_timer <= 0.0:
 					var max_row := SpecialBricks.max_spawn_row(layout, capsule_speed)
 					var cells := SpecialBricks.free_cells(bricks, max_row)
-					var cell := SpecialBricks.pick_cell(rng, cells, layout, ball, vel, radius)
+					var cell := SpecialBricks.pick_cell(rng, cells, layout, balls, radius)
 					if cell.x < 0:
 						spawn_timer = SpecialBricks.RETRY_SECONDS
 					else:
 						pending = {"cell": cell, "timer": SpecialBricks.TELEGRAPH_SECONDS}
 						spawn_timer = SpecialBricks.next_interval(rng)
 
-		# A bola pode sair pelo fundo (perda), mas nunca pelos outros tres lados.
-		if ball.x < play.position.x - radius - 1.0 or ball.x > play.end.x + radius + 1.0 \
-				or ball.y < play.position.y - radius - 1.0:
-			in_bounds = false
-
-		if bool(result["lost"]):
+		# Uma vida so e perdida quando a ULTIMA bola cai.
+		if balls.is_empty():
 			lost += 1
 			paddle_x = play.get_center().x
-			ball = ArenaLayout.docked_ball_position(layout, paddle_x, width_scale)
-			vel = BallPhysics.launch_velocity(speed, 0.0)
+			balls = [{
+				"pos": ArenaLayout.docked_ball_position(layout, paddle_x, width_scale),
+				"vel": BallPhysics.launch_velocity(speed, 0.0),
+				"phase": 0.0,
+			}]
 			effects = {}
 			capsules = []
 
@@ -1269,7 +1434,20 @@ func _simulate_run(viewport: Vector2, max_seconds: float, seed_value: int = 0,
 		"in_bounds": in_bounds,
 		"caught": caught,
 		"specials": specials,
+		"max_balls": max_balls,
 	}
+
+
+## A bola mais baixa em jogo - a que a raquete automatica persegue.
+func _lowest_ball(balls: Array) -> Dictionary:
+	var best: Dictionary = {"pos": Vector2.ZERO, "vel": Vector2.ZERO}
+	var best_y := -INF
+	for ball in balls:
+		var pos: Vector2 = ball["pos"]
+		if pos.y > best_y:
+			best_y = pos.y
+			best = ball
+	return best
 
 
 ## Capsula mais proxima de chegar a linha da raquete, ou {} se nenhuma esta perto.

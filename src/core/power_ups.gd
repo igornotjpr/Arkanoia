@@ -30,6 +30,18 @@ const LIFE := "life"
 const BONUS := "bonus"
 const NARROW := "narrow"
 const FAST := "fast"
+const MULTI := "multi"
+
+## As alucinacoes. Sete das oito nao tocam a simulacao: elas custam pontos porque
+## a MAO do jogador piora, nao porque a fisica mudou. A excecao e VERTIGEM, que
+## inverte o controle de verdade - por isso e a unica no canal de jogo.
+const SHUFFLE := "shuffle"
+const MIRROR := "mirror"
+const CURVE := "curve"
+const DECOY := "decoy"
+const GHOST := "ghost"
+const HAZE := "haze"
+const DARK := "dark"
 
 ## Pontos de EUFORIA, antes do multiplicador de risco.
 const BONUS_POINTS := 750
@@ -38,6 +50,22 @@ const BONUS_POINTS := 750
 ## COMPOSICAO de varios efeitos - o layout so conhece um fator de cada vez.
 const SPEED_MIN_SCALE := 0.72
 const SPEED_MAX_SCALE := 1.35
+
+## MULTIBOLA. Cada bola vira SPLIT_COUNT, ate o teto simultaneo. Acima de 6 a
+## tela vira sopa e o jogador perde de vista qual bola importa.
+const MAX_BALLS := 6
+const SPLIT_COUNT := 3
+const SPLIT_SPREAD := 0.42   # radianos entre as bolas irmas
+
+## DERIVA. A rotacao e OSCILANTE, nunca constante: por alternar de sinal ela nao
+## acumula, se autocorrige e nunca encosta na trava de angulo minimo vertical do
+## BallPhysics. Desenha um S, e nao uma espiral que orbitaria a raquete para
+## sempre - a mesma classe de defeito que MIN_PADDLE_ANGLE existe para evitar.
+const CURVE_FREQUENCY := 3.0    # radianos por segundo de fase
+const CURVE_AMPLITUDE := 1.2    # radianos por segundo no pico
+
+## PARANOIA: quantas bolas falsas acompanham as verdadeiras.
+const DECOY_COUNT := 2
 
 ## Catalogo. Cada entrada:
 ##   label          texto do popup ao apanhar (maiusculas, sem acento)
@@ -123,6 +151,97 @@ const EFFECTS := {
 		"speed_factor": 1.0,
 		"sigil": ["#.#.#", ".#.#.", "#.#.#"],
 		"shade": 0.06,
+	},
+	MULTI: {
+		"label": "CISAO",
+		"channel": CHANNEL_PLAY,
+		"duration": 0.0,
+		"risk": -1,
+		"tier": TIER_RARE,
+		"paddle_factor": 1.0,
+		"speed_factor": 1.0,
+		"sigil": ["#...#", ".....", "#...#"],
+		"shade": -0.04,
+	},
+
+	# --- Alucinacoes ---------------------------------------------------------
+	SHUFFLE: {
+		"label": "MIRAGEM",
+		"channel": CHANNEL_VISUAL,
+		"duration": 9.0,
+		"risk": 2,
+		"tier": TIER_RARE,
+		"paddle_factor": 1.0,
+		"speed_factor": 1.0,
+		"sigil": [".#.#.", "..#..", ".#.#."],
+		"shade": 0.03,
+	},
+	MIRROR: {
+		"label": "VERTIGEM",
+		"channel": CHANNEL_PLAY,
+		"duration": 8.0,
+		"risk": 3,
+		"tier": TIER_RARE,
+		"paddle_factor": 1.0,
+		"speed_factor": 1.0,
+		"invert_axis": true,
+		"sigil": ["##.##", "..#..", "##.##"],
+		"shade": -0.01,
+	},
+	CURVE: {
+		"label": "DERIVA",
+		"channel": CHANNEL_PLAY,
+		"duration": 10.0,
+		"risk": 2,
+		"tier": TIER_RARE,
+		"paddle_factor": 1.0,
+		"speed_factor": 1.0,
+		"sigil": ["#....", ".###.", "....#"],
+		"shade": 0.02,
+	},
+	DECOY: {
+		"label": "PARANOIA",
+		"channel": CHANNEL_VISUAL,
+		"duration": 9.0,
+		"risk": 1,
+		"tier": TIER_RARE,
+		"paddle_factor": 1.0,
+		"speed_factor": 1.0,
+		"sigil": ["#.#..", ".....", "..#.#"],
+		"shade": -0.03,
+	},
+	GHOST: {
+		"label": "FANTASMA",
+		"channel": CHANNEL_VISUAL,
+		"duration": 8.0,
+		"risk": 2,
+		"tier": TIER_RARE,
+		"paddle_factor": 1.0,
+		"speed_factor": 1.0,
+		"sigil": [".###.", ".#.#.", ".###."],
+		"shade": 0.01,
+	},
+	HAZE: {
+		"label": "DIPLOPIA",
+		"channel": CHANNEL_VISUAL,
+		"duration": 9.0,
+		"risk": 1,
+		"tier": TIER_RARE,
+		"paddle_factor": 1.0,
+		"speed_factor": 1.0,
+		"sigil": ["##...", ".....", "...##"],
+		"shade": 0.0,
+	},
+	DARK: {
+		"label": "BREU",
+		"channel": CHANNEL_VISUAL,
+		"duration": 7.0,
+		"risk": 2,
+		"tier": TIER_RARE,
+		"paddle_factor": 1.0,
+		"speed_factor": 1.0,
+		"sigil": ["#####", "#...#", "#####"],
+		"shade": 0.055,
 	},
 }
 
@@ -274,6 +393,54 @@ static func risk_level(active: Dictionary) -> int:
 	for id in active:
 		total += risk(id)
 	return total
+
+
+## --- Alucinacoes e multibola (funcoes puras) -------------------------------
+
+## Velocidades das bolas irmas ao dividir. A original nao entra na lista.
+##
+## O leque e simetrico em torno da direcao original, entao a divisao nao empurra
+## o conjunto para um lado - com leque assimetrico, CISAO viraria um empurrao.
+static func split_velocities(vel: Vector2, count: int, spread: float) -> Array:
+	var result: Array = []
+	if count <= 0 or vel == Vector2.ZERO:
+		return result
+
+	for i in range(1, count + 1):
+		var step := ceili(float(i) * 0.5)
+		var side := 1.0 if i % 2 == 1 else -1.0
+		result.append(BallPhysics.enforce_min_vertical(vel.rotated(side * step * spread)))
+	return result
+
+
+## Rotacao a aplicar na velocidade neste quadro, sob DERIVA.
+##
+## Oscilante de proposito: a integral sobre um periodo completo e zero, entao a
+## direcao MEDIA da bola nao muda e a curva nunca vira deriva permanente.
+static func curve_rotation(phase: float, delta: float) -> float:
+	return sin(phase * CURVE_FREQUENCY) * CURVE_AMPLITUDE * delta
+
+
+## Permutacao dos blocos vivos, sob MIRAGEM. Devolve { id -> id }.
+##
+## E uma BIJECAO sobre o conjunto recebido: cada bloco e desenhado exatamente uma
+## vez, em exatamente um lugar. A silhueta da parede fica pixel a pixel identica
+## - so as cores e os valores trocam de posicao. Se fosse um sorteio livre, dois
+## blocos cairiam na mesma celula e a mentira seria obvia no primeiro quadro.
+static func shuffle_map(ids: Array, rng: RandomNumberGenerator) -> Dictionary:
+	var shuffled := ids.duplicate()
+
+	# Fisher-Yates com o rng recebido, para a permutacao ser reproduzivel.
+	for i in range(shuffled.size() - 1, 0, -1):
+		var j := rng.randi_range(0, i)
+		var swap: Variant = shuffled[i]
+		shuffled[i] = shuffled[j]
+		shuffled[j] = swap
+
+	var result := {}
+	for index in ids.size():
+		result[ids[index]] = shuffled[index]
+	return result
 
 
 ## --- Sorteio ---------------------------------------------------------------

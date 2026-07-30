@@ -4,10 +4,11 @@ Clone de Arkanoid em Godot 4.6, para embutir na seção secreta de jogos do proj
 de ferramentas do TJ-PR. Roda em navegador desktop e mobile, com leaderboard
 global no Supabase.
 
-**Versão 1: uma fase, gráficos e efeitos completos, lógica testada.** Tiros,
-power-ups e aceleração temporária ficam para etapas seguintes.
+**Uma fase, gráficos e efeitos completos, lógica testada, e um cardápio de
+power-ups psicológicos** que embaralham a percepção do jogador sem nunca mexer na
+física. Tiros e novas fases ficam para etapas seguintes.
 
-Versão atual: **v1.2.0** — o que mudou em cada uma está em [CHANGELOG.md](CHANGELOG.md).
+Versão atual: **v2.0.0** — o que mudou em cada uma está em [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
@@ -39,18 +40,57 @@ cada fase nova. A posição central só vale no começo de uma partida.
 Blocos especiais soltam cápsulas que descem pela tela. A raquete apanha — ou
 desvia, que muitas vezes é a jogada certa.
 
+Todo item é um estado mental — o cardápio se lê como uma lista de sintomas, e é
+essa a piada do nome do jogo.
+
+**Comuns** (caem dos blocos `S`, fixos no mapa):
+
 | Cápsula | Efeito | Risco |
 |---|---|---|
 | **LUCIDEZ** | raquete larga | −1 |
 | **CALMA** | bola lenta | −1 |
-| **FOLEGO** | +1 vida | 0 |
-| **EUFORIA** | pontos instantâneos | 0 |
 | **PANICO** | raquete curta | +2 |
 | **SURTO** | bola rápida | +2 |
 
-Todo item é um estado mental — o cardápio se lê como uma lista de sintomas, e é
-essa a piada do nome do jogo. As alucinações que mexem com a percepção (MIRAGEM,
-VERTIGEM, DERIVA, PARANOIA e companhia) chegam na v2.0.0.
+**Raros** (caem dos blocos que surgem durante a partida):
+
+| Cápsula | Efeito | Risco |
+|---|---|---|
+| **FOLEGO** | +1 vida | 0 |
+| **EUFORIA** | pontos instantâneos | 0 |
+| **CISAO** | divide cada bola em três, até seis | −1 |
+| **PARANOIA** | bolas fantasma que não colidem | +1 |
+| **DIPLOPIA** | o campo desenhado duas vezes, deslocado | +1 |
+| **MIRAGEM** | os blocos trocam de lugar — só visualmente | +2 |
+| **FANTASMA** | blocos destruídos continuam aparecendo | +2 |
+| **BREU** | escuridão, exceto uma janela em volta da bola | +2 |
+| **DERIVA** | a trajetória da bola encurva | +2 |
+| **VERTIGEM** | os comandos invertem | +3 |
+
+Sete de dez raros são alucinações: o bloco que surge no meio da fase vale mais
+justamente porque provavelmente vai te sabotar.
+
+### Por que as alucinações não são trapaça
+
+Cinco delas (**MIRAGEM**, **PARANOIA**, **FANTASMA**, **DIPLOPIA**, **BREU**) não
+tocam a simulação em **nada**. Elas vivem num canal separado, lido apenas dentro
+do código de desenho — nunca em `_update_paddle`, `_simulate_balls` ou `_hit_brick`.
+Elas custam pontos porque a **sua mão** piora, não porque a física mudou.
+
+Isso é garantido por teste, não por disciplina: o soak roda uma partida inteira
+com cada efeito visual forçado e exige que a duração, as rebatidas, o combo e a
+parede saiam **idênticos** aos da partida sem ele. Há também um controle com um
+efeito do canal de jogo, que precisa mudar a partida — senão o teste passaria
+mesmo com tudo quebrado.
+
+MIRAGEM, em particular, é uma **bijeção** sobre os blocos vivos: a silhueta da
+parede fica pixel a pixel igual, só as cores e os valores trocam de posição. A
+parede que você acerta continua sendo a que está lá.
+
+**VERTIGEM** e **DERIVA** são as duas exceções — mexem no jogo de verdade, e por
+isso moram no canal de jogo e valem o maior risco do cardápio. A curva da DERIVA
+é oscilante, nunca constante: ela desenha um S e volta, em vez de virar uma
+espiral que faria a bola orbitar a raquete para sempre.
 
 **Risco vira pontos.** Cada nível de risco ativo multiplica o que cada bloco vale,
 até 2,5×. Itens benignos têm risco **negativo**: acumular só vantagem reduz o que
@@ -315,14 +355,12 @@ Depois embuta na página do TJ-PR seguindo `web/exemplo-embed.html`.
 
 Ordem sugerida, do mais barato ao mais caro:
 
-1. **Alucinações (v2.0.0)**: MIRAGEM (blocos trocam de lugar só visualmente),
-   VERTIGEM (comandos invertidos), DERIVA (a bola encurva), PARANOIA (bolas
-   fantasma), FANTASMA, DIPLOPIA, BREU. A fundação já está pronta: basta
-   acrescentar entradas no catálogo de `power_ups.gd` e trocar `Arena._visual_rect`,
-   hoje uma função identidade, pela permutação.
-2. **Mais fases**: adicionar mapas em `LevelBuilder.LEVELS`. O formato é texto de
+1. **Mais fases**: adicionar mapas em `LevelBuilder.LEVELS`. O formato é texto de
    11×8 e a suíte já valida qualquer fase nova.
-3. **Multibola e laser**: exigem refatorar a `Arena`, que hoje tem uma única
-   `_ball_pos`. É refatoração, não power-up — por isso ficaram de fora da v1.2.0.
+2. **Laser**: a raquete atira. O `InputSetup.LAUNCH` já existe e não faz nada
+   durante a partida, então é o gatilho natural.
+3. **Mais alucinações**: DELIRIO (o HUD mostra pontos e vidas errados), ECO (o
+   rastro da bola não apaga), SOSIA (uma segunda raquete falsa). Todas baratas —
+   é uma entrada no catálogo mais um bloco em `_draw`.
 4. **Edge Function de validação** (seção 4 acima).
 5. **Música de fundo** em loop, sintetizada como os efeitos.

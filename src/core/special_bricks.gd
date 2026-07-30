@@ -106,9 +106,20 @@ static func is_cell_safe(cell_rect: Rect2, ball_pos: Vector2, ball_vel: Vector2,
 	return true
 
 
+## True quando a celula esta livre de TODAS as bolas em jogo.
+##
+## Cada bola e um Dictionary com "pos" e "vel", como em Arena._balls. Com a
+## multibola, checar so uma deixaria as outras serem atropeladas.
+static func is_cell_safe_for_all(cell_rect: Rect2, balls: Array, radius: float, lookahead: float) -> bool:
+	for ball in balls:
+		if not is_cell_safe(cell_rect, ball["pos"], ball["vel"], radius, lookahead):
+			return false
+	return true
+
+
 ## Sorteia uma celula livre e segura. Devolve Vector2i(-1, -1) quando nao ha.
 static func pick_cell(rng: RandomNumberGenerator, cells: Array, layout: Dictionary,
-		ball_pos: Vector2, ball_vel: Vector2, radius: float) -> Vector2i:
+		balls: Array, radius: float) -> Vector2i:
 	var pool := cells.duplicate()
 	while not pool.is_empty():
 		var index := rng.randi_range(0, pool.size() - 1)
@@ -116,7 +127,7 @@ static func pick_cell(rng: RandomNumberGenerator, cells: Array, layout: Dictiona
 		pool.remove_at(index)
 
 		var cell_rect := ArenaLayout.brick_rect(layout, cell.x, cell.y)
-		if is_cell_safe(cell_rect, ball_pos, ball_vel, radius, BALL_LOOKAHEAD):
+		if is_cell_safe_for_all(cell_rect, balls, radius, BALL_LOOKAHEAD):
 			return cell
 
 	return Vector2i(-1, -1)

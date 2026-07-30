@@ -30,6 +30,17 @@ const CLEARED_DELAY := 2.2
 const LEVEL_INTRO_DELAY := 1.3
 const COMBO_POPUP_MIN := 3
 
+## Teto de blocos fantasma desenhados sob FANTASMA.
+const GHOST_LIMIT := 60
+
+## DIPLOPIA: deslocamento e opacidade da segunda imagem do campo.
+const HAZE_OFFSET := 5.0
+const HAZE_ALPHA := 0.38
+
+## BREU: meia altura e meia largura da janela de visao em volta da bola.
+const DARK_WINDOW := Vector2(78.0, 62.0)
+const DARK_ALPHA := 0.93
+
 var _layout: Dictionary = {}
 var _bricks: Array = []
 var _alive_count := 0
@@ -38,9 +49,15 @@ var _paddle_x := 0.0
 var _paddle_prev_x := 0.0
 var _paddle_vx := 0.0
 
-var _ball_pos := Vector2.ZERO
-var _ball_vel := Vector2.ZERO
-var _trail: Array[Vector2] = []
+## Bolas em jogo. Cada uma e um Dictionary, como todo dado do projeto:
+##   { "pos": Vector2, "vel": Vector2, "trail": Array, "phase": float }
+##
+## "phase" so alimenta a curva da DERIVA, para bolas irmas nao encurvarem em
+## uniao - sem ele, a multibola sob DERIVA pareceria um unico objeto grosso.
+##
+## Uma vida so e perdida quando a ULTIMA bola cai: com multibola ativa, perder
+## uma das tres nao custa nada, que e o que torna o item generoso de verdade.
+var _balls: Array = []
 
 var _state: State = State.DOCKED
 var _state_timer := 0.0
@@ -88,6 +105,21 @@ var _pending_spawn: Dictionary = {}
 var specials_spawned := 0
 var capsules_caught := 0
 
+## --- Estado das alucinacoes ------------------------------------------------
+## TUDO daqui e lido apenas dentro de _draw*. Nada disto pode chegar a
+## _update_paddle, _simulate_balls, _hit_brick ou _targets - a regra esta no
+## cabecalho de power_ups.gd e e garantida por teste, nao por disciplina.
+
+## MIRAGEM: bijecao { id verdadeiro -> id cujo retangulo sera usado no desenho }.
+var _shuffle: Dictionary = {}
+
+## FANTASMA: blocos ja destruidos que continuam sendo desenhados.
+var _ghosts: Array = []
+
+## PARANOIA: bolas falsas. Ricocheteiam so nas bordas, nunca consultam _targets
+## e nunca podem ser perdidas.
+var _decoys: Array = []
+
 
 func _ready() -> void:
 	_has_touch = DisplayServer.is_touchscreen_available()
@@ -126,6 +158,9 @@ func start_level() -> void:
 	_special_alive = 0
 	_pending_spawn.clear()
 	_spawn_timer = SpecialBricks.next_interval(_rng)
+	_shuffle.clear()
+	_ghosts.clear()
+	_decoys.clear()
 
 	_intro_timer = LEVEL_INTRO_DELAY
 	_message = "FASE %d" % GameState.level
@@ -143,10 +178,25 @@ func dock_ball() -> void:
 	_paddle_x = ArenaLayout.paddle_rect(_layout, _paddle_x, _paddle_scale()).get_center().x
 	_paddle_prev_x = _paddle_x
 	_paddle_vx = 0.0
-	_ball_pos = ArenaLayout.docked_ball_position(_layout, _paddle_x, _paddle_scale())
-	_ball_vel = Vector2.ZERO
-	_trail.clear()
+	_balls = [_make_ball(ArenaLayout.docked_ball_position(_layout, _paddle_x, _paddle_scale()), Vector2.ZERO)]
 	_state = State.DOCKED
+
+
+func _make_ball(pos: Vector2, vel: Vector2) -> Dictionary:
+	return {"pos": pos, "vel": vel, "trail": [], "phase": _rng.randf() * TAU}
+
+
+## A bola mais baixa em jogo - a que o piloto automatico persegue e a que o BREU
+## ilumina primeiro. Com uma bola so, e ela mesma.
+func lowest_ball() -> Dictionary:
+	var best := {}
+	var best_y := -INF
+	for ball in _balls:
+		var pos: Vector2 = ball["pos"]
+		if pos.y > best_y:
+			best_y = pos.y
+			best = ball
+	return best
 
 
 ## Lanca a bola a partir da raquete.
@@ -154,10 +204,27 @@ func launch_ball() -> void:
 	if _state != State.DOCKED or _intro_timer > 0.0:
 		return
 	var bias := clampf(_paddle_vx / 320.0, -1.0, 1.0)
-	_ball_vel = BallPhysics.launch_velocity(current_ball_speed(), bias)
+	for ball in _balls:
+		ball["vel"] = BallPhysics.launch_velocity(current_ball_speed(), bias)
 	_state = State.PLAYING
 	_message = ""
 	Sfx.play("launch")
+
+
+## MULTIBOLA: divide cada bola em jogo, ate o teto de bolas simultaneas.
+func split_balls() -> void:
+	if _state != State.PLAYING:
+		return
+
+	var spawned: Array = []
+	for ball in _balls:
+		var extra := PowerUps.split_velocities(ball["vel"], PowerUps.SPLIT_COUNT - 1, PowerUps.SPLIT_SPREAD)
+		for vel in extra:
+			if _balls.size() + spawned.size() >= PowerUps.MAX_BALLS:
+				break
+			spawned.append(_make_ball(ball["pos"], vel))
+
+	_balls.append_array(spawned)
 
 
 ## Velocidade atual da bola: fase + escala do layout + progresso + power-ups.
@@ -201,11 +268,12 @@ func _process(delta: float) -> void:
 
 	match _state:
 		State.DOCKED:
-			_ball_pos = ArenaLayout.docked_ball_position(_layout, _paddle_x, _paddle_scale())
+			for ball in _balls:
+				ball["pos"] = ArenaLayout.docked_ball_position(_layout, _paddle_x, _paddle_scale())
 			if autopilot or Input.is_action_just_pressed(InputSetup.LAUNCH):
 				launch_ball()
 		State.PLAYING:
-			_simulate_ball(delta)
+			_simulate_balls(delta)
 		State.LOST, State.CLEARED:
 			_advance_state_timer(delta)
 		State.OVER:
@@ -219,7 +287,9 @@ func _update_paddle(delta: float) -> void:
 
 	if autopilot:
 		var play := play_rect()
-		target = play.position.x + 4.0 if autopilot_miss else _ball_pos.x
+		var chased := lowest_ball()
+		var chase_x := play.get_center().x if chased.is_empty() else Vector2(chased["pos"]).x
+		target = play.position.x + 4.0 if autopilot_miss else chase_x
 		var rect_auto := ArenaLayout.paddle_rect(_layout, target, _paddle_scale())
 		_paddle_prev_x = _paddle_x
 		_paddle_x = rect_auto.get_center().x
@@ -230,14 +300,18 @@ func _update_paddle(delta: float) -> void:
 	# sempre de _paddle_x - o ponto onde o mouse deixou a raquete, sem salto para
 	# o centro. Ao soltar a tecla o modo continua KEYBOARD: a raquete so volta a
 	# seguir o cursor apos um movimento real do mouse, detectado em _input.
-	# paddle_axis_sign vale 1.0 com o cardapio da v1.2.0. Ele ja entra aqui para
-	# que VERTIGEM, na v2.0.0, seja so uma entrada nova no catalogo.
-	var axis := Input.get_axis(InputSetup.LEFT, InputSetup.RIGHT) * PowerUps.paddle_axis_sign(_effects)
+	# VERTIGEM inverte o eixo. No teclado isso e trocar o sinal; no mouse, que e
+	# absoluto, inverter so faz sentido como REFLEXAO em torno do centro do campo
+	# - o cursor a esquerda leva a raquete a direita, na mesma distancia.
+	var axis_sign := PowerUps.paddle_axis_sign(_effects)
+	var axis := Input.get_axis(InputSetup.LEFT, InputSetup.RIGHT) * axis_sign
 	if not is_zero_approx(axis):
 		_input_mode = InputMode.KEYBOARD
 		target += axis * PADDLE_KEY_SPEED * float(_layout["speed_scale"]) * delta
 	elif _input_mode == InputMode.MOUSE:
 		target = get_viewport().get_mouse_position().x
+		if axis_sign < 0.0:
+			target = play_rect().get_center().x * 2.0 - target
 
 	var rect := ArenaLayout.paddle_rect(_layout, target, _paddle_scale())
 	_paddle_prev_x = _paddle_x
@@ -245,36 +319,73 @@ func _update_paddle(delta: float) -> void:
 	_paddle_vx = (_paddle_x - _paddle_prev_x) / maxf(delta, 0.0001)
 
 
-func _simulate_ball(delta: float) -> void:
-	# Reajusta o modulo mantendo a direcao: a velocidade sobe com o progresso.
-	if _ball_vel != Vector2.ZERO:
-		_ball_vel = _ball_vel.normalized() * current_ball_speed()
-
+## Avanca todas as bolas em jogo.
+##
+## Os alvos sao remontados ANTES de cada bola, e nao uma vez por quadro: o mapa
+## "consumed" do BallPhysics vale por chamada, entao duas bolas na mesma parede
+## poderiam cobrar o mesmo bloco duas vezes. Remontando, a segunda bola ja nao
+## enxerga o que a primeira destruiu.
+func _simulate_balls(delta: float) -> void:
 	# A MESMA escala usada no desenho. Divergir aqui faria a raquete desenhar
 	# larga e colidir estreita - o pior bug possivel neste jogo.
 	_paddle_target["rect"] = ArenaLayout.paddle_rect(_layout, _paddle_x, _paddle_scale())
 	_paddle_target["vx"] = _paddle_vx
 
-	_targets.clear()
-	_targets.append(_paddle_target)
-	for brick in _bricks:
-		if brick["alive"]:
-			_targets.append(brick)
+	var radius := float(_layout["ball_radius"])
+	var play := play_rect()
+	var speed := current_ball_speed()
+	var curving := _effects.has(PowerUps.CURVE)
+	var survivors: Array = []
 
-	var result := BallPhysics.advance(
-		_ball_pos, _ball_vel, float(_layout["ball_radius"]), delta, play_rect(), _targets
-	)
-	_ball_pos = result["pos"]
-	_ball_vel = result["vel"]
+	for ball in _balls:
+		var vel: Vector2 = ball["vel"]
 
-	for event in result["events"]:
-		_handle_collision(event)
+		# Reajusta o modulo mantendo a direcao: a velocidade sobe com o progresso.
+		if vel != Vector2.ZERO:
+			vel = vel.normalized() * speed
 
-	_push_trail(_ball_pos)
+		# DERIVA: rotacao OSCILANTE, nunca constante. Por alternar de sinal ela
+		# nao acumula, se autocorrige e nunca encosta na trava de angulo minimo
+		# vertical - desenha um S, e nao uma espiral que orbitaria a raquete.
+		if curving:
+			ball["phase"] = float(ball["phase"]) + delta
+			vel = BallPhysics.enforce_min_vertical(
+				vel.rotated(PowerUps.curve_rotation(float(ball["phase"]), delta))
+			)
 
-	if result["lost"]:
+		_targets.clear()
+		_targets.append(_paddle_target)
+		for brick in _bricks:
+			if brick["alive"]:
+				_targets.append(brick)
+
+		var result := BallPhysics.advance(ball["pos"], vel, radius, delta, play, _targets)
+		ball["pos"] = result["pos"]
+		ball["vel"] = result["vel"]
+
+		for event in result["events"]:
+			_handle_collision(event)
+
+		_push_trail(ball)
+
+		if not bool(result["lost"]):
+			survivors.append(ball)
+
+	var dropped := _balls.size() - survivors.size()
+	_balls = survivors
+
+	if _balls.is_empty():
 		_on_ball_lost()
-	elif _alive_count == 0:
+		return
+
+	if dropped > 0:
+		# Ainda ha bola em jogo: perder uma das irmas nao custa vida nenhuma.
+		Sfx.play("wall", 0.7)
+		_fx.shake(1.2)
+
+	# Fora do elif de proposito: a ultima bola pode limpar a parede no mesmo
+	# quadro em que uma irma cai, e a fase precisa terminar mesmo assim.
+	if _alive_count == 0:
 		_on_level_cleared()
 
 
@@ -328,6 +439,17 @@ func _hit_brick(brick: Dictionary, point: Vector2) -> void:
 
 	_drop_capsule(brick, rect)
 
+	# FANTASMA: o bloco morto continua sendo desenhado. Ele nao esta em _bricks
+	# como vivo, nao esta em _targets, e nao conta para _alive_count - so existe
+	# no desenho, para o jogador nao saber mais o que ja limpou.
+	if _effects.has(PowerUps.GHOST) and _ghosts.size() < GHOST_LIMIT:
+		_ghosts.append({"rect": rect, "color": color})
+
+	# A bijecao da MIRAGEM vale sobre os blocos VIVOS, e o conjunto acabou de
+	# mudar: sem refazer, ela apontaria para um bloco que ja nao existe.
+	if _effects.has(PowerUps.SHUFFLE):
+		_rebuild_shuffle()
+
 	var label := str(points)
 	var label_color := Palette.TEXT
 	if GameState.combo >= COMBO_POPUP_MIN:
@@ -338,17 +460,45 @@ func _hit_brick(brick: Dictionary, point: Vector2) -> void:
 
 ## --- Power-ups -------------------------------------------------------------
 
-## Retangulo em que o bloco e DESENHADO. Identidade na v1.2.0.
+## Retangulo em que o bloco e DESENHADO.
 ##
-## Existe desde ja, e usado em todos os pontos de desenho e de efeito, para que
-## MIRAGEM (v2.0.0) seja uma mudanca de tres linhas aqui dentro, numa funcao que
-## a essa altura ja rodou uma versao inteira em producao. A colisao NUNCA passa
-## por aqui: _targets continua lendo brick["rect"], a verdade.
+## Sob MIRAGEM, devolve o retangulo de OUTRO bloco vivo, segundo a bijecao. A
+## colisao nunca passa por aqui: _targets continua lendo brick["rect"], que e a
+## verdade. A parede que voce acerta e a parede que esta la - so as cores e os
+## valores e que trocaram de lugar.
 func _visual_rect(brick: Dictionary) -> Rect2:
-	return brick["rect"]
+	if _shuffle.is_empty():
+		return brick["rect"]
+
+	var target_id: Variant = _shuffle.get(int(brick["id"]), null)
+	if target_id == null:
+		return brick["rect"]
+
+	var index := int(target_id)
+	if index < 0 or index >= _bricks.size():
+		return brick["rect"]
+	return _bricks[index]["rect"]
+
+
+## Recalcula a permutacao da MIRAGEM sobre os blocos vivos.
+##
+## Precisa rodar a cada morte: o conjunto de vivos muda, e uma bijecao velha
+## apontaria para um bloco que ja nao existe.
+func _rebuild_shuffle() -> void:
+	if not _effects.has(PowerUps.SHUFFLE):
+		_shuffle.clear()
+		return
+
+	var alive_ids: Array = []
+	for brick in _bricks:
+		if brick["alive"]:
+			alive_ids.append(int(brick["id"]))
+	_shuffle = PowerUps.shuffle_map(alive_ids, _rng)
 
 
 func _update_effects(delta: float) -> void:
+	_update_decoys(delta)
+
 	if _effects.is_empty():
 		return
 
@@ -358,6 +508,61 @@ func _update_effects(delta: float) -> void:
 	for id in ticked["expired"]:
 		Sfx.play("effect_end")
 		_fx.popup(_paddle_center(), PowerUps.label(id) + " FIM", Palette.TEXT_DIM)
+
+		# A alucinacao que acaba precisa devolver o campo ao normal na hora.
+		match str(id):
+			PowerUps.SHUFFLE:
+				_shuffle.clear()
+			PowerUps.DECOY:
+				_decoys.clear()
+			PowerUps.GHOST:
+				_ghosts.clear()
+
+
+## PARANOIA: as bolas falsas so ricocheteiam nas bordas do campo. Nunca
+## consultam _targets, nunca quebram bloco, nunca podem ser perdidas.
+##
+## Elas batem no fundo e voltam - e essa a pista que denuncia a falsa para quem
+## esta prestando atencao. O efeito e sacana, nao desonesto.
+func _update_decoys(delta: float) -> void:
+	if _decoys.is_empty():
+		return
+
+	var play := play_rect()
+	var radius := float(_layout["ball_radius"])
+
+	for decoy in _decoys:
+		var pos: Vector2 = decoy["pos"]
+		var vel: Vector2 = decoy["vel"]
+		pos += vel * delta
+
+		if pos.x < play.position.x + radius or pos.x > play.end.x - radius:
+			vel.x = -vel.x
+			pos.x = clampf(pos.x, play.position.x + radius, play.end.x - radius)
+		if pos.y < play.position.y + radius or pos.y > play.end.y - radius:
+			vel.y = -vel.y
+			pos.y = clampf(pos.y, play.position.y + radius, play.end.y - radius)
+
+		decoy["pos"] = pos
+		decoy["vel"] = vel
+
+
+func _spawn_decoys() -> void:
+	_decoys.clear()
+	var source := lowest_ball()
+	if source.is_empty():
+		return
+
+	var base: Vector2 = source["vel"]
+	if base == Vector2.ZERO:
+		base = Vector2(0.6, -1.0).normalized() * current_ball_speed()
+
+	for i in PowerUps.DECOY_COUNT:
+		var angle := (float(i) + 1.0) * 0.55
+		_decoys.append({
+			"pos": Vector2(source["pos"]),
+			"vel": base.rotated(angle if i % 2 == 0 else -angle),
+		})
 
 
 func _update_capsules(delta: float) -> void:
@@ -396,7 +601,7 @@ func _update_spawn(delta: float) -> void:
 	var max_row := SpecialBricks.max_spawn_row(_layout, Capsules.speed(_layout))
 	var cells := SpecialBricks.free_cells(_bricks, max_row)
 	var cell := SpecialBricks.pick_cell(
-		_rng, cells, _layout, _ball_pos, _ball_vel, float(_layout["ball_radius"])
+		_rng, cells, _layout, _balls, float(_layout["ball_radius"])
 	)
 
 	if cell.x < 0:
@@ -416,7 +621,7 @@ func _materialize_spawn() -> void:
 	# dela faria BallPhysics eject-la pelo eixo de menor penetracao - um teleporte
 	# visivel e inexplicavel para quem esta jogando.
 	var cell_rect := ArenaLayout.brick_rect(_layout, cell.x, cell.y)
-	if not SpecialBricks.is_cell_safe(cell_rect, _ball_pos, _ball_vel, float(_layout["ball_radius"]), SpecialBricks.BALL_LOOKAHEAD):
+	if not SpecialBricks.is_cell_safe_for_all(cell_rect, _balls, float(_layout["ball_radius"]), SpecialBricks.BALL_LOOKAHEAD):
 		_spawn_timer = SpecialBricks.RETRY_SECONDS
 		return
 
@@ -464,13 +669,23 @@ func _collect(item: String) -> void:
 	var risk := PowerUps.risk_level(_effects)
 	GameState.add_score(ScoreRules.capsule_points(PowerUps.tier(item), risk))
 
-	if item == PowerUps.LIFE:
-		GameState.gain_life()
-	elif item == PowerUps.BONUS:
-		GameState.add_score(int(round(PowerUps.BONUS_POINTS * ScoreRules.risk_multiplier(risk))))
+	match item:
+		PowerUps.LIFE:
+			GameState.gain_life()
+		PowerUps.BONUS:
+			GameState.add_score(int(round(PowerUps.BONUS_POINTS * ScoreRules.risk_multiplier(risk))))
+		PowerUps.MULTI:
+			split_balls()
 
 	_effects = PowerUps.apply(_effects, item)
 	_fx.popup(_paddle_center(), PowerUps.label(item), Palette.TEXT_ACCENT)
+
+	# As alucinacoes que precisam de estado montam o seu na hora da coleta.
+	match item:
+		PowerUps.SHUFFLE:
+			_rebuild_shuffle()
+		PowerUps.DECOY:
+			_spawn_decoys()
 
 
 func _paddle_center() -> Vector2:
@@ -481,12 +696,14 @@ func _paddle_center() -> Vector2:
 func _on_ball_lost() -> void:
 	_state = State.LOST
 	_state_timer = LOST_DELAY
-	_ball_vel = Vector2.ZERO
-	_trail.clear()
+	_balls.clear()
 
 	# Perder uma vida derruba as bencaos E as maldicoes: uma maldicao nao
 	# atravessa uma morte que o jogador ja pagou.
 	_effects.clear()
+	_ghosts.clear()
+	_shuffle.clear()
+	_decoys.clear()
 	_capsules.clear()
 	_pending_spawn.clear()
 
@@ -508,8 +725,9 @@ func _on_ball_lost() -> void:
 func _on_level_cleared() -> void:
 	_state = State.CLEARED
 	_state_timer = CLEARED_DELAY
-	_ball_vel = Vector2.ZERO
-	_trail.clear()
+	for ball in _balls:
+		ball["vel"] = Vector2.ZERO
+		Array(ball["trail"]).clear()
 
 	var bonus := ScoreRules.level_clear_bonus(GameState.level, GameState.lives)
 	GameState.add_score(bonus)
@@ -550,10 +768,11 @@ func _decay_brick_flashes(delta: float) -> void:
 			brick["flash"] = maxf(flash - delta * 5.0, 0.0)
 
 
-func _push_trail(pos: Vector2) -> void:
-	_trail.append(pos)
-	while _trail.size() > TRAIL_LENGTH:
-		_trail.pop_front()
+func _push_trail(ball: Dictionary) -> void:
+	var trail: Array = ball["trail"]
+	trail.append(Vector2(ball["pos"]))
+	while trail.size() > TRAIL_LENGTH:
+		trail.pop_front()
 
 
 ## --- Entrada ---------------------------------------------------------------
@@ -588,14 +807,18 @@ func _on_viewport_resized() -> void:
 
 	# Remapeia a bola, a raquete e as capsulas proporcionalmente para o novo campo.
 	_paddle_x = ArenaLayout.remap_axis(_paddle_x, old_play.position.x, old_play.end.x, new_play.position.x, new_play.end.x)
-	_ball_pos = Vector2(
-		ArenaLayout.remap_axis(_ball_pos.x, old_play.position.x, old_play.end.x, new_play.position.x, new_play.end.x),
-		ArenaLayout.remap_axis(_ball_pos.y, old_play.position.y, old_play.end.y, new_play.position.y, new_play.end.y)
-	)
+	for ball in _balls:
+		var pos: Vector2 = ball["pos"]
+		ball["pos"] = Vector2(
+			ArenaLayout.remap_axis(pos.x, old_play.position.x, old_play.end.x, new_play.position.x, new_play.end.x),
+			ArenaLayout.remap_axis(pos.y, old_play.position.y, old_play.end.y, new_play.position.y, new_play.end.y)
+		)
+		Array(ball["trail"]).clear()
+		if _state == State.DOCKED:
+			ball["pos"] = ArenaLayout.docked_ball_position(_layout, _paddle_x, _paddle_scale())
+
 	_capsules = Capsules.remap(_capsules, old_play, new_play)
-	_trail.clear()
-	if _state == State.DOCKED:
-		_ball_pos = ArenaLayout.docked_ball_position(_layout, _paddle_x, _paddle_scale())
+	_ghosts.clear()
 
 
 func play_rect() -> Rect2:
@@ -608,16 +831,92 @@ func play_rect() -> Rect2:
 ## raquete engolindo a capsula, e nao como a capsula passando por cima dela.
 func _draw() -> void:
 	_draw_field()
+	_draw_ghosts()
 	for brick in _bricks:
 		if brick["alive"]:
 			_draw_brick(brick)
+	_draw_haze()
 	_draw_pending_spawn()
 	_draw_capsules()
 	_draw_paddle()
-	_draw_ball()
+	_draw_balls()
+	_draw_dark()
 	_draw_combo()
 	_draw_effects()
 	_draw_message()
+
+
+## FANTASMA: blocos ja destruidos, desenhados translucidos. Vem ANTES dos vivos
+## para que um bloco vivo sempre ganhe a sobreposicao - o fantasma engana sobre o
+## que sobrou, nunca esconde o que esta la.
+func _draw_ghosts() -> void:
+	for ghost in _ghosts:
+		var color: Color = ghost["color"]
+		color.a = 0.32
+		draw_rect(Rect2(ghost["rect"]), color, true)
+
+
+## DIPLOPIA: o campo desenhado uma segunda vez, deslocado e translucido.
+##
+## Redesenha so os retangulos base, sem chanfro nem trinca: a segunda imagem
+## precisa ser barata, e o borrao le melhor sem detalhe fino.
+func _draw_haze() -> void:
+	if not _effects.has(PowerUps.HAZE):
+		return
+
+	var offset := Vector2(
+		sin(_blink * 1.7) * HAZE_OFFSET,
+		cos(_blink * 1.3) * HAZE_OFFSET * 0.6
+	)
+
+	for brick in _bricks:
+		if not brick["alive"]:
+			continue
+		var color: Color = brick["color"]
+		color.a = HAZE_ALPHA
+		var rect := _visual_rect(brick)
+		draw_rect(Rect2(rect.position + offset, rect.size), color, true)
+
+	for ball in _balls:
+		var ghost_ball := Palette.BALL
+		ghost_ball.a = HAZE_ALPHA
+		_draw_ball_at(Vector2(ball["pos"]) + offset, ghost_ball)
+
+
+## BREU: escuridao sobre o campo, exceto uma janela em volta da bola mais baixa.
+##
+## Quatro retangulos emoldurando o buraco, e nao uma grade de tiles: em retrato o
+## campo tem 1200 px de altura e uma grade custaria milhares de draw_rect por
+## quadro. O preco e que a janela e UMA so - com CISAO ativa, as bolas irmas
+## somem no escuro. Isso e proposital, e e a combinacao mais cruel do jogo.
+##
+## A FAIXA DA RAQUETE fica sempre iluminada. Escurece-la tambem transformava o
+## efeito em sorte em vez de pericia: o jogador precisa ver as proprias maos. O
+## que o BREU tira e o cenario - os blocos, as capsulas, o que ainda falta.
+func _draw_dark() -> void:
+	if not _effects.has(PowerUps.DARK):
+		return
+
+	var play := play_rect()
+	var paddle_top := float(_layout["paddle_y"]) - 4.0
+	var area := Rect2(play.position, Vector2(play.size.x, maxf(paddle_top - play.position.y, 0.0)))
+	if area.size.y <= 0.0:
+		return
+
+	var focus := lowest_ball()
+	var center := area.get_center() if focus.is_empty() else Vector2(focus["pos"])
+
+	var window := Rect2(center - DARK_WINDOW, DARK_WINDOW * 2.0).intersection(area)
+	var shade := Color(0.0, 0.0, 0.0, DARK_ALPHA)
+
+	if window.size.x <= 0.0 or window.size.y <= 0.0:
+		draw_rect(area, shade, true)
+		return
+
+	draw_rect(Rect2(area.position.x, area.position.y, area.size.x, window.position.y - area.position.y), shade, true)
+	draw_rect(Rect2(area.position.x, window.end.y, area.size.x, area.end.y - window.end.y), shade, true)
+	draw_rect(Rect2(area.position.x, window.position.y, window.position.x - area.position.x, window.size.y), shade, true)
+	draw_rect(Rect2(window.end.x, window.position.y, area.end.x - window.end.x, window.size.y), shade, true)
 
 
 func _draw_field() -> void:
@@ -691,22 +990,33 @@ func _draw_paddle() -> void:
 	draw_rect(Rect2(rect.end.x - tip, rect.position.y, tip, 1), Palette.lighten(Palette.PADDLE_TIP, 0.4), true)
 
 
-func _draw_ball() -> void:
-	# Rastro: quadrados de 4 px com alpha crescente ate a bola.
-	var count := _trail.size()
-	for i in count:
-		var alpha := (float(i + 1) / float(count)) * 0.30
-		var color := Palette.BALL_TRAIL
-		color.a = alpha
-		var p: Vector2 = _trail[i]
-		draw_rect(Rect2(roundf(p.x) - 2, roundf(p.y) - 2, 4, 4), color, true)
+func _draw_balls() -> void:
+	# PARANOIA: bolas falsas primeiro, para a verdadeira ficar por cima quando
+	# duas se cruzam. Elas nao colidem com nada e nunca podem ser perdidas - so
+	# existem para o jogador duvidar de qual esta seguindo.
+	for decoy in _decoys:
+		_draw_ball_at(Vector2(decoy["pos"]), Palette.BALL)
 
-	# Bola: circulo pixelado 8x8 montado com tres retangulos.
-	var x := roundf(_ball_pos.x) - 4.0
-	var y := roundf(_ball_pos.y) - 4.0
-	draw_rect(Rect2(x + 2, y, 4, 8), Palette.BALL, true)
-	draw_rect(Rect2(x + 1, y + 1, 6, 6), Palette.BALL, true)
-	draw_rect(Rect2(x, y + 2, 8, 4), Palette.BALL, true)
+	for ball in _balls:
+		var trail: Array = ball["trail"]
+		var count := trail.size()
+		for i in count:
+			var alpha := (float(i + 1) / float(count)) * 0.30
+			var color := Palette.BALL_TRAIL
+			color.a = alpha
+			var p: Vector2 = trail[i]
+			draw_rect(Rect2(roundf(p.x) - 2, roundf(p.y) - 2, 4, 4), color, true)
+
+		_draw_ball_at(Vector2(ball["pos"]), Palette.BALL)
+
+
+## Bola: circulo pixelado 8x8 montado com tres retangulos.
+func _draw_ball_at(pos: Vector2, color: Color) -> void:
+	var x := roundf(pos.x) - 4.0
+	var y := roundf(pos.y) - 4.0
+	draw_rect(Rect2(x + 2, y, 4, 8), color, true)
+	draw_rect(Rect2(x + 1, y + 1, 6, 6), color, true)
+	draw_rect(Rect2(x, y + 2, 8, 4), color, true)
 
 
 ## Contorno piscando onde um bloco especial vai materializar. Nada aparece sem

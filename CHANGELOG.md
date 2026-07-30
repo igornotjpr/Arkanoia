@@ -14,6 +14,51 @@ git log v1.0.0..v1.1.0     # tudo que entrou entre as duas
 
 ---
 
+## v2.0.0 — 30/07/2026
+
+O marco de conteúdo: as alucinações, que são a alma do jogo, mais a multibola.
+
+### Adicionado
+
+- **Sete alucinações.** **MIRAGEM** (os blocos trocam de lugar, só visualmente),
+  **VERTIGEM** (os comandos invertem), **DERIVA** (a bola encurva), **PARANOIA**
+  (bolas fantasma que não colidem), **FANTASMA** (blocos destruídos continuam
+  aparecendo), **DIPLOPIA** (o campo desenhado duas vezes, deslocado) e **BREU**
+  (escuridão exceto uma janela em volta da bola).
+- **CISAO**: divide cada bola em três, até seis simultâneas. Perder uma não custa
+  nada — só a última bola tira vida.
+- Sete de dez cápsulas raras são alucinações, então o bloco que surge no meio da
+  fase vale mais justamente porque provavelmente vai sabotar quem o quebra.
+
+### Alterado
+
+- **A `Arena` passou a trabalhar com uma lista de bolas** em vez de uma só.
+  Os alvos são remontados antes de cada bola: o mapa `consumed` do `BallPhysics`
+  vale por chamada, e sem remontar duas bolas cobrariam o mesmo bloco no mesmo
+  quadro.
+- `SpecialBricks.pick_cell` recebe a lista de bolas e checa todas — com multibola,
+  olhar só uma deixaria as outras serem atropeladas por um bloco novo.
+- **BREU mantém a faixa da raquete iluminada.** Escurecê-la também transformava o
+  efeito em sorte em vez de perícia: o jogador precisa ver as próprias mãos. O
+  que o BREU tira é o cenário.
+
+### A regra que sustenta tudo
+
+Cinco das sete alucinações não tocam a simulação em nada. Elas vivem num canal
+separado, lido apenas dentro do código de desenho. O soak roda uma partida
+inteira com cada efeito visual forçado e exige duração, rebatidas, combo e parede
+**idênticos** aos da partida sem ele — mais um controle com efeito do canal de
+jogo, que precisa mudar a partida, senão o teste passaria com tudo quebrado.
+
+MIRAGEM é uma **bijeção** sobre os blocos vivos: a silhueta da parede fica pixel a
+pixel igual. A curva da DERIVA é **oscilante**, com integral zero num período, em
+vez de constante — uma rotação constante brigaria com a trava de ângulo mínimo
+vertical e faria a bola orbitar a raquete para sempre.
+
+3264 asserts no total (eram 2893).
+
+---
+
 ## v1.2.0 — 30/07/2026
 
 Fundação dos power-ups, com os seis itens clássicos. As alucinações vêm na
