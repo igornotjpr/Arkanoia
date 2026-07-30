@@ -22,6 +22,16 @@ O **pause discreto** é modo emergência de escritório: a tela fica inteirament
 branca com `PAUSE` em cinza claro no centro, e o áudio é silenciado no mesmo
 instante. Nada de cores ou logotipo — de longe não parece um jogo.
 
+Sob o `PAUSE` há dois botões em cinza sobre branco, que preservam o disfarce:
+**CONTINUAR** e **SAIR PARA O INÍCIO**. Sair abandona a partida sem enviar
+pontuação — só a tela de fim de jogo publica no ranking. Clique fora dos botões
+não faz nada, para não custar a corrida por engano; `P` e `Esc` continuam sendo
+o despause de emergência de uma tecla.
+
+A raquete nunca volta sozinha para o meio da tela: ao trocar do mouse para o
+teclado ela parte de onde estava, e continua no lugar a cada vida perdida e a
+cada fase nova. A posição central só vale no começo de uma partida.
+
 ### Progressão
 
 A fase 1 tem 88 blocos em 11×8. Ao limpar a parede, o jogo avança de fase com o
@@ -152,10 +162,20 @@ privilégios por coluna e o trigger de rate limit.
 | URL e chave publishable | válidas — a requisição autentica e chega ao PostgREST |
 | CORS | `access-control-allow-origin: *`, então GitHub Pages funciona |
 | Caminho HTTP do cliente Godot | funciona — mesma resposta que o `curl` |
-| View `leaderboard` | **não existe ainda** → `404 PGRST205` |
+| View `leaderboard` | criada e respondendo `200` com as pontuações |
 
-Ou seja: o único passo pendente é executar o schema. Um `401` indicaria chave
-inválida; o `404` prova que a autenticação passou e só o objeto está faltando.
+O schema já foi executado. Um `401` indicaria chave inválida; um `404 PGRST205`
+significaria que a autenticação passou e só falta rodar `supabase/schema.sql`.
+
+### Gzip no build web
+
+A Cloudflare na frente do Supabase responde com `Content-Encoding: gzip`. No
+navegador quem busca é o `fetch()`, que **já devolve o corpo descomprimido** mas
+mantém o cabeçalho — e o Godot, acreditando nele, tentava descomprimir JSON puro
+e falhava com `RESULT_BODY_DECOMPRESS_FAILED`. Era isso que virava
+`FALHA DE REDE (8)` na tela, mesmo com o servidor respondendo `200`. Por isso
+`Leaderboard._make_request` desliga `accept_gzip` só na web. Fora dela o Godot
+fala HTTP direto e a descompressão é legítima.
 
 ### 2. Credenciais
 

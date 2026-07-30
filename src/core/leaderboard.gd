@@ -25,6 +25,7 @@ const RESULT_NAMES := {
 	HTTPRequest.RESULT_TLS_HANDSHAKE_ERROR: "FALHA DE TLS",
 	HTTPRequest.RESULT_NO_RESPONSE: "SEM RESPOSTA",
 	HTTPRequest.RESULT_BODY_SIZE_LIMIT_EXCEEDED: "RESPOSTA GRANDE DEMAIS",
+	HTTPRequest.RESULT_BODY_DECOMPRESS_FAILED: "FALHA AO DESCOMPRIMIR",
 	HTTPRequest.RESULT_REQUEST_FAILED: "REQUISICAO FALHOU",
 	HTTPRequest.RESULT_DOWNLOAD_FILE_CANT_OPEN: "ARQUIVO INACESSIVEL",
 	HTTPRequest.RESULT_DOWNLOAD_FILE_WRITE_ERROR: "ERRO DE ESCRITA",
@@ -100,6 +101,13 @@ func _make_request(callback: Callable) -> HTTPRequest:
 	request.process_mode = Node.PROCESS_MODE_ALWAYS
 	request.timeout = SupabaseConfig.TIMEOUT_SECONDS
 	request.use_threads = not OS.has_feature("web")
+	# No build web quem faz a requisicao e o fetch() do navegador, que ja entrega
+	# o corpo descomprimido - mas continua expondo o cabecalho "Content-Encoding:
+	# gzip" que a Cloudflare do Supabase manda. Com accept_gzip ligado, o Godot
+	# acredita no cabecalho e tenta descomprimir JSON puro, o que falha com
+	# RESULT_BODY_DECOMPRESS_FAILED e derruba o ranking inteiro. Fora da web o
+	# Godot fala HTTP direto e a descompressao e legitima.
+	request.accept_gzip = not OS.has_feature("web")
 	add_child(request)
 	request.request_completed.connect(callback)
 	return request

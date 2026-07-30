@@ -1,3 +1,7 @@
 Pasta de saida do export web (Godot escreve index.html, .wasm, .pck aqui).
 O arquivo .nojekyll e obrigatorio: sem ele o GitHub Pages ignora arquivos
 que comecam com underscore, quebrando o build do Godot.
+
+O arquivo .gdignore tambem e obrigatorio: sem ele o Godot importa os PNGs que
+ele mesmo acabou de exportar aqui, e eles voltam para dentro do .pck do proximo
+export - o build engorda a cada exportacao.

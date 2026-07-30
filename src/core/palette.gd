@@ -35,6 +35,12 @@ const PAUSE_BG := Color(1.0, 1.0, 1.0)
 const PAUSE_TEXT := Color(0.741, 0.749, 0.780)  # cinza claro, quase invisivel
 const PAUSE_HINT := Color(0.855, 0.859, 0.878)
 
+# Botoes do menu de pause. Tons de cinza sobre branco: de longe a tela continua
+# parecendo um documento, nao um jogo.
+const PAUSE_BUTTON := Color(0.969, 0.973, 0.980)
+const PAUSE_BUTTON_HOVER := Color(0.906, 0.914, 0.933)
+const PAUSE_BUTTON_BORDER := Color(0.831, 0.839, 0.863)
+
 ## Cores das 8 fileiras padrao de blocos (indice 0 = fileira do topo).
 const BRICK_ROWS: Array[Color] = [
 	Color(0.878, 0.290, 0.235), # 0 vermelho  #E04A3C

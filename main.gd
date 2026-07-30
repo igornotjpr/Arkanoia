@@ -82,6 +82,9 @@ func _ready() -> void:
 	_pause = PauseOverlay.new()
 	_pause.name = "PauseOverlay"
 	_pause.resume_requested.connect(func() -> void: _set_paused(false))
+	# Abandonar a partida pelo menu de pause nao envia pontuacao: so a tela de
+	# fim de jogo publica no ranking, e a corrida abortada nao chegou la.
+	_pause.menu_requested.connect(show_title)
 	pause_layer.add_child(_pause)
 
 	GameState.game_finished.connect(_on_game_finished)

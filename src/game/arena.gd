@@ -96,8 +96,13 @@ func start_level() -> void:
 
 
 ## Recoloca a bola sobre a raquete, aguardando o lancamento.
+##
+## A raquete NAO volta ao centro: ela fica onde o jogador deixou. No mouse isso
+## era invisivel (o cursor reassume a posicao no quadro seguinte), mas no teclado
+## o recuo ao centro teleportava a raquete a cada vida perdida e a cada fase
+## nova. A posicao inicial de uma partida e definida uma unica vez, em _ready.
 func dock_ball() -> void:
-	_paddle_x = play_rect().get_center().x
+	_paddle_x = ArenaLayout.paddle_rect(_layout, _paddle_x).get_center().x
 	_paddle_prev_x = _paddle_x
 	_paddle_vx = 0.0
 	_ball_pos = ArenaLayout.docked_ball_position(_layout, _paddle_x)
@@ -160,7 +165,6 @@ func _process(delta: float) -> void:
 func _update_paddle(delta: float) -> void:
 	var target := _paddle_x
 
-	# Teclado tem prioridade enquanto uma tecla estiver pressionada.
 	if autopilot:
 		var play := play_rect()
 		target = play.position.x + 4.0 if autopilot_miss else _ball_pos.x
@@ -170,6 +174,10 @@ func _update_paddle(delta: float) -> void:
 		_paddle_vx = (_paddle_x - _paddle_prev_x) / maxf(delta, 0.0001)
 		return
 
+	# O teclado assume o controle enquanto uma tecla estiver pressionada, e parte
+	# sempre de _paddle_x - o ponto onde o mouse deixou a raquete, sem salto para
+	# o centro. Ao soltar a tecla o modo continua KEYBOARD: a raquete so volta a
+	# seguir o cursor apos um movimento real do mouse, detectado em _input.
 	var axis := Input.get_axis(InputSetup.LEFT, InputSetup.RIGHT)
 	if not is_zero_approx(axis):
 		_input_mode = InputMode.KEYBOARD
