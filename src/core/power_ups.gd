@@ -74,6 +74,7 @@ const DECOY_COUNT := 2
 ##                  conjunto ativo (a Arena resolve na hora e pronto)
 ##   risk           peso somado em risk_level(); NEGATIVO nos itens benignos
 ##   tier           de qual bloco especial este item cai
+##   weight         chance relativa dentro do tier; ausente vale 1.0
 ##   paddle_factor  multiplicador da largura da raquete
 ##   speed_factor   multiplicador da velocidade da bola
 ##   sigil          3 linhas de 5 caracteres, '#' aceso e '.' apagado
@@ -125,6 +126,7 @@ const EFFECTS := {
 		"duration": 10.0,
 		"risk": 2,
 		"tier": TIER_COMMON,
+		"weight": 3.0,
 		"paddle_factor": 1.0,
 		"speed_factor": 1.28,
 		"sigil": ["..#..", ".###.", "#####"],
@@ -158,6 +160,7 @@ const EFFECTS := {
 		"duration": 0.0,
 		"risk": -1,
 		"tier": TIER_RARE,
+		"weight": 4.0,
 		"paddle_factor": 1.0,
 		"speed_factor": 1.0,
 		"sigil": ["#...#", ".....", "#...#"],
@@ -289,6 +292,11 @@ static func risk(id: String) -> int:
 
 static func tier(id: String) -> int:
 	return int(_entry(id).get("tier", TIER_COMMON))
+
+
+## Chance relativa dentro do tier. 1.0 e a linha de base; 3.0 sai tres vezes mais.
+static func weight(id: String) -> float:
+	return maxf(float(_entry(id).get("weight", 1.0)), 0.0)
 
 
 static func sigil(id: String) -> Array:
@@ -463,11 +471,44 @@ static func drop_table(brick_type: int) -> Array:
 	return result
 
 
+## Soma dos pesos de um tier. Serve para conferir a chance de um item nos testes.
+static func total_weight(brick_type: int) -> float:
+	var total := 0.0
+	for id in drop_table(brick_type):
+		total += weight(str(id))
+	return total
+
+
+## Chance de um item especifico sair do bloco informado, de 0.0 a 1.0.
+static func drop_chance(id: String, brick_type: int) -> float:
+	var total := total_weight(brick_type)
+	if total <= 0.0 or not drop_table(brick_type).has(id):
+		return 0.0
+	return weight(id) / total
+
+
 ## Sorteia o item solto por um bloco. Devolve "" quando o bloco nao solta nada.
+##
+## O sorteio e PONDERADO: cada item concorre com o seu weight. CISAO e SURTO
+## saem mais que os demais porque sao os dois que mais mudam a partida - um
+## enchendo a tela de bolas, o outro apertando o ritmo.
 ##
 ## O rng vem de fora, sempre: e o que torna uma corrida reproduzivel nos testes.
 static func roll_drop(rng: RandomNumberGenerator, brick_type: int) -> String:
 	var table := drop_table(brick_type)
 	if table.is_empty():
 		return ""
-	return str(table[rng.randi_range(0, table.size() - 1)])
+
+	var total := total_weight(brick_type)
+	if total <= 0.0:
+		return str(table[rng.randi_range(0, table.size() - 1)])
+
+	var pick := rng.randf() * total
+	for id_variant in table:
+		var id := str(id_variant)
+		pick -= weight(id)
+		if pick <= 0.0:
+			return id
+
+	# Guarda contra erro de arredondamento no ultimo item.
+	return str(table[table.size() - 1])

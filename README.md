@@ -8,7 +8,7 @@ global no Supabase.
 power-ups psicológicos** que embaralham a percepção do jogador sem nunca mexer na
 física. Tiros e novas fases ficam para etapas seguintes.
 
-Versão atual: **v2.0.0** — o que mudou em cada uma está em [CHANGELOG.md](CHANGELOG.md).
+Versão atual: **v2.1.0** — o que mudou em cada uma está em [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
@@ -51,6 +51,9 @@ essa a piada do nome do jogo.
 | **CALMA** | bola lenta | −1 |
 | **PANICO** | raquete curta | +2 |
 | **SURTO** | bola rápida | +2 |
+
+**SURTO** sai em metade das cápsulas comuns, e **CISAO** em quase um terço das
+raras — os dois itens que mais mudam a partida são também os mais frequentes.
 
 **Raros** (caem dos blocos que surgem durante a partida):
 

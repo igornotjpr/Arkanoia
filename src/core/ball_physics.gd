@@ -87,8 +87,21 @@ static func advance(pos: Vector2, vel: Vector2, radius: float, dt: float, bounds
 			consumed[id] = true
 
 			if int(target.get("kind", KIND_BRICK)) == KIND_PADDLE:
-				vel = paddle_bounce(pos, vel, target["rect"], float(target.get("vx", 0.0)))
-				events.append({"type": "paddle", "id": id, "point": pos, "normal": Vector2.UP})
+				# A raquete so rebate pelo TOPO.
+				#
+				# Uma bola encostada por BAIXO ja passou: devolve-la para cima
+				# prendia o jogo num laco eterno. _resolve_rect via a penetracao
+				# vertical como a menor, empurrava a bola para baixo da raquete e
+				# invertia vel.y; paddle_bounce entao sobrescrevia a velocidade
+				# para cima, incondicionalmente. No quadro seguinte tudo se
+				# repetia, com a bola parada no mesmo pixel para sempre.
+				# Encontrado pelo soak test em 30/07/2026, com 19934 rebatidas em
+				# 400s de simulacao e a parede nunca terminando.
+				if res["normal"] == Vector2.DOWN:
+					vel = res["vel"]
+				else:
+					vel = paddle_bounce(pos, vel, target["rect"], float(target.get("vx", 0.0)))
+					events.append({"type": "paddle", "id": id, "point": pos, "normal": Vector2.UP})
 			else:
 				vel = res["vel"]
 				events.append({"type": "brick", "id": id, "point": pos, "normal": res["normal"]})

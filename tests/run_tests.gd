@@ -326,6 +326,49 @@ func _test_ball_physics() -> void:
 	res = BallPhysics.advance(Vector2(50.0, 50.0), Vector2(100.0, 100.0), radius, 0.0, bounds, [])
 	_check(Vector2(res["pos"]) == Vector2(50.0, 50.0), "dt zero nao move a bola")
 
+	# ------------------------------------------------------------------
+	# REGRESSAO: bola presa POR BAIXO da raquete (encontrada em 30/07/2026)
+	# ------------------------------------------------------------------
+	# _resolve_rect via a penetracao vertical como a menor, empurrava a bola para
+	# baixo da raquete e invertia vel.y; paddle_bounce entao sobrescrevia a
+	# velocidade para cima, incondicionalmente. No quadro seguinte tudo se
+	# repetia: a bola ficava parada no mesmo pixel para sempre, e a partida
+	# nunca terminava. O soak fez 19934 rebatidas em 400 s antes de acusar.
+	var trap_bounds := Rect2(0.0, 0.0, 640.0, 360.0)
+	var trap_paddle := Rect2(300.0, 326.0, 74.0, 10.0)
+	var trap_targets: Array = [{
+		"rect": trap_paddle, "id": "paddle", "kind": BallPhysics.KIND_PADDLE, "vx": 0.0,
+	}]
+
+	# Bola encostada no lado de BAIXO da raquete, tentando subir.
+	var trapped := BallPhysics.advance(
+		Vector2(337.0, 340.0), Vector2(25.0, -208.0), radius, 1.0 / 60.0, trap_bounds, trap_targets
+	)
+	_check(Vector2(trapped["vel"]).y > 0.0,
+		"bola encostada por baixo da raquete nao e relancada para cima")
+	_check(not _has_event(trapped, "paddle"),
+		"encostar por baixo nao conta como rebatida")
+
+	# E ela precisa mesmo CAIR: 120 quadros depois, ja saiu pelo fundo.
+	var trap_pos := Vector2(337.0, 340.0)
+	var trap_vel := Vector2(25.0, -208.0)
+	var escaped := false
+	for _frame in 120:
+		var stepped := BallPhysics.advance(trap_pos, trap_vel, radius, 1.0 / 60.0, trap_bounds, trap_targets)
+		trap_pos = stepped["pos"]
+		trap_vel = stepped["vel"]
+		if bool(stepped["lost"]):
+			escaped = true
+			break
+	_check(escaped, "a bola que passou por baixo da raquete e perdida, nao fica presa")
+
+	# O caso legitimo continua funcionando: bola vindo de CIMA e rebatida.
+	var above := BallPhysics.advance(
+		Vector2(337.0, 320.0), Vector2(0.0, 240.0), radius, 1.0 / 60.0, trap_bounds, trap_targets
+	)
+	_check(_has_event(above, "paddle"), "bola vinda de cima ainda e rebatida")
+	_check(Vector2(above["vel"]).y < 0.0, "a rebatida legitima devolve a bola para cima")
+
 
 func _has_event(result: Dictionary, type_name: String) -> bool:
 	for event in result["events"]:
@@ -816,6 +859,52 @@ func _test_power_ups() -> void:
 			PowerUps.roll_drop(rng_b, LevelBuilder.TYPE_SPECIAL),
 			"sorteio %d reproduzivel com a mesma semente" % i)
 	_eq(PowerUps.roll_drop(rng_a, LevelBuilder.TYPE_NORMAL), "", "bloco comum sorteia vazio")
+
+	# --- Sorteio ponderado ---
+	# SURTO e CISAO saem mais que os demais: sao os dois itens que mais mudam a
+	# partida, um apertando o ritmo e o outro enchendo a tela de bolas.
+	for id_variant in PowerUps.all_ids():
+		_check(PowerUps.weight(str(id_variant)) > 0.0, "'%s' tem peso positivo" % id_variant)
+
+	_check(PowerUps.weight(PowerUps.FAST) > PowerUps.weight(PowerUps.NARROW),
+		"SURTO sai mais que os outros comuns")
+	_check(PowerUps.weight(PowerUps.MULTI) > PowerUps.weight(PowerUps.SHUFFLE),
+		"CISAO sai mais que as alucinacoes")
+
+	var fast_chance := PowerUps.drop_chance(PowerUps.FAST, LevelBuilder.TYPE_SPECIAL)
+	var multi_chance := PowerUps.drop_chance(PowerUps.MULTI, LevelBuilder.TYPE_SPECIAL_SPAWNED)
+	_check(fast_chance > 0.4 and fast_chance < 0.6,
+		"SURTO fica perto de metade das capsulas comuns (%.0f%%)" % (fast_chance * 100.0))
+	_check(multi_chance > 0.2 and multi_chance < 0.35,
+		"CISAO fica perto de um terco das capsulas raras (%.0f%%)" % (multi_chance * 100.0))
+	_eq(PowerUps.drop_chance(PowerUps.FAST, LevelBuilder.TYPE_NORMAL), 0.0,
+		"bloco comum nao solta SURTO")
+	_eq(PowerUps.drop_chance(PowerUps.MULTI, LevelBuilder.TYPE_SPECIAL), 0.0,
+		"bloco fixo nao solta CISAO")
+
+	# Toda chance de um tier tem que somar 1: nenhum item fica inalcancavel e o
+	# sorteio nunca "cai fora" da tabela.
+	for brick_type in [LevelBuilder.TYPE_SPECIAL, LevelBuilder.TYPE_SPECIAL_SPAWNED]:
+		var sum_chance := 0.0
+		for id_variant in PowerUps.drop_table(brick_type):
+			var chance := PowerUps.drop_chance(str(id_variant), brick_type)
+			_check(chance > 0.0, "'%s' e alcancavel no sorteio" % id_variant)
+			sum_chance += chance
+		_approx(sum_chance, 1.0, EPS, "as chances do tipo %d somam 1" % brick_type)
+
+	# E a frequencia observada precisa bater com o peso declarado.
+	var tally := {}
+	var trials := 20000
+	var rng_w := RandomNumberGenerator.new()
+	rng_w.seed = 20260730
+	for i in trials:
+		var id := PowerUps.roll_drop(rng_w, LevelBuilder.TYPE_SPECIAL_SPAWNED)
+		tally[id] = int(tally.get(id, 0)) + 1
+	var observed := float(int(tally.get(PowerUps.MULTI, 0))) / float(trials)
+	_approx(observed, multi_chance, 0.02,
+		"CISAO saiu %.1f%% das vezes, esperado %.1f%%" % [observed * 100.0, multi_chance * 100.0])
+	_eq(tally.size(), PowerUps.drop_table(LevelBuilder.TYPE_SPECIAL_SPAWNED).size(),
+		"em 20 mil sorteios todo item raro apareceu ao menos uma vez")
 
 	# Ordem da faixa: a do catalogo, nao a de insercao. Sem isso os sigilos
 	# dancariam na tela a cada efeito que expira.

@@ -14,6 +14,30 @@ git log v1.0.0..v1.1.0     # tudo que entrou entre as duas
 
 ---
 
+## v2.1.0 — 30/07/2026
+
+### Corrigido
+
+- **A bola podia ficar presa embaixo da raquete, para sempre.** `_resolve_rect`
+  via a penetração vertical como a menor, empurrava a bola para baixo da raquete
+  e invertia `vel.y`; em seguida `paddle_bounce` sobrescrevia a velocidade para
+  cima, incondicionalmente. No quadro seguinte tudo se repetia, com a bola
+  parada no mesmo pixel e a partida sem fim. Agora a raquete só rebate pelo
+  **topo**: quem passou por baixo cai e é perdida, como deve ser.
+
+  O defeito existia desde a v1.0.0 e só apareceu quando o aumento de frequência
+  do SURTO deixou a bola rápida por mais tempo. O soak acusou com 19934 rebatidas
+  em 400 s e a parede nunca terminando. Há teste de regressão dedicado.
+
+### Alterado
+
+- **Sorteio de cápsulas agora é ponderado.** Cada item tem um `weight`, e o
+  ajuste pedido: **SURTO** de 25% para 50% das cápsulas comuns, **CISAO** de 10%
+  para 31% das raras. São os dois itens que mais mudam a partida — um apertando o
+  ritmo, o outro enchendo a tela de bolas.
+
+---
+
 ## v2.0.0 — 30/07/2026
 
 O marco de conteúdo: as alucinações, que são a alma do jogo, mais a multibola.
