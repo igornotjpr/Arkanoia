@@ -7,6 +7,8 @@ global no Supabase.
 **Versão 1: uma fase, gráficos e efeitos completos, lógica testada.** Tiros,
 power-ups e aceleração temporária ficam para etapas seguintes.
 
+Versão atual: **v1.1.0** — o que mudou em cada uma está em [CHANGELOG.md](CHANGELOG.md).
+
 ---
 
 ## Como jogar
