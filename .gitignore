@@ -1,0 +1,10 @@
+# Godot 4+ specific ignores
+.godot/
+/android/
+
+# macOS
+.DS_Store
+
+# ATENCAO: docs/ NAO entra aqui.
+# Essa pasta e a saida do export web e e justamente o que o GitHub Pages
+# publica. Ignora-la quebraria a publicacao do jogo.
