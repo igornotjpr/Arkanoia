@@ -1155,6 +1155,34 @@ func _test_schema_mirror() -> void:
 	_check(ScoreRules.plausible_ceiling(realistic_seconds) > 40000,
 		"uma partida de %ds aceita placares muito acima do que o jogo produz" % realistic_seconds)
 
+	# --- Versao exibida no menu ---
+	# Mesma defesa contra deriva: a versao mostrada no rodape do menu vem de
+	# project.godot, e precisa bater com a entrada mais recente do CHANGELOG.
+	var version := TextUtil.version()
+	_check(not version.is_empty(), "o jogo declara uma versao em project.godot")
+	_check(version.begins_with("V"), "a versao exibida comeca com V (%s)" % version)
+
+	for i in version.length():
+		_check(PixelFont.has_glyph(version[i]),
+			"glifo existe para '%s' (usado na versao)" % version[i])
+
+	var changelog := FileAccess.get_file_as_string("res://CHANGELOG.md")
+	_check(not changelog.is_empty(), "CHANGELOG.md e legivel")
+	if not changelog.is_empty():
+		# A primeira linha "## vX.Y.Z" e a versao corrente.
+		var latest := ""
+		for line in changelog.split("\n"):
+			if str(line).begins_with("## v"):
+				latest = str(line).substr(3).split(" ")[0].strip_edges()
+				break
+		_eq(version, latest.to_upper(),
+			"a versao do menu bate com a entrada mais recente do CHANGELOG")
+
+	var readme := FileAccess.get_file_as_string("res://README.md")
+	if not readme.is_empty():
+		_check(readme.contains("**%s**" % version.substr(1)) or readme.contains(version.substr(1)),
+			"o README cita a versao corrente (%s)" % version.substr(1))
+
 
 # ============================================================================
 #  Soak test: partida completa simulada

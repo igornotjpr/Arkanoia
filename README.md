@@ -138,7 +138,7 @@ src/core/               camada pura (sem nós, sem SceneTree) + autoloads
   capsules.gd           queda e coleta das cápsulas
   special_bricks.gd     surgimento do bloco especial e a regra da altura mínima
   nick_util.gd          sanitização do nick
-  text_util.gd          formatação de data e placar
+  text_util.gd          formatação de data, placar e versão
   pixel_font.gd         fonte bitmap 5x7 gerada em runtime
   palette.gd            paleta fixa
   input_setup.gd        registro das ações de entrada

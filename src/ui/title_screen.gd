@@ -16,6 +16,7 @@ const TITLE_SCALE := 4
 const NICK_BOX_SIZE := Vector2(136.0, 22.0)
 const BUTTON_SIZE := Vector2(132.0, 22.0)
 const TEXT_PADDING := 6.0
+const VERSION_MARGIN := 6.0
 
 var _nick_edit: LineEdit
 var _board: LeaderboardView
@@ -198,6 +199,21 @@ func _draw() -> void:
 
 	_draw_play_button()
 	_draw_legend()
+	_draw_version()
+
+
+## Versao no canto inferior direito, discreta.
+##
+## Alinhada a direita e presa ao rodape da tela, e nao ao bloco central: assim
+## ela nunca disputa espaco com a legenda, que e centrada e cresce para os lados.
+func _draw_version() -> void:
+	var text := TextUtil.version()
+	if text.is_empty():
+		return
+	PixelFont.draw_text_right(
+		self, size.x - VERSION_MARGIN, size.y - PixelFont.text_height(1) - VERSION_MARGIN,
+		text, 1, Palette.FRAME_LIGHT
+	)
 
 
 func _draw_nick_box() -> void:

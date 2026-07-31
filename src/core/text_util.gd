@@ -23,3 +23,15 @@ static func format_iso_date(iso: String) -> String:
 ## Numero com zeros a esquerda, para o placar em fonte de largura fixa.
 static func pad_number(value: int, digits: int) -> String:
 	return str(maxi(value, 0)).lpad(digits, "0")
+
+
+## Versao do jogo, como escrita no rodape do menu.
+##
+## A FONTE E project.godot (application/config/version), e nao uma constante
+## aqui: assim o mesmo numero vale para o jogo, para o export e para qualquer
+## ferramenta que leia o projeto. O teste _test_schema_mirror confere que ele
+## bate com a entrada mais recente do CHANGELOG - a mesma defesa contra deriva
+## que ja existe entre ScoreRules e o schema do Supabase.
+static func version() -> String:
+	var raw := str(ProjectSettings.get_setting("application/config/version", ""))
+	return "" if raw.is_empty() else "V" + raw

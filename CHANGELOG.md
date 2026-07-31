@@ -18,6 +18,14 @@ git log v1.0.0..v1.1.0     # tudo que entrou entre as duas
 
 Os efeitos negativos ficaram mais duros e mais legíveis.
 
+### Adicionado
+
+- **Número da versão no canto inferior direito do menu.** A fonte é
+  `application/config/version` no `project.godot`, então o mesmo número vale para
+  o jogo, para o export e para qualquer ferramenta que leia o projeto. Um teste
+  confere que ele bate com a entrada mais recente deste arquivo e com o README —
+  a mesma defesa contra deriva que já existe entre `ScoreRules` e o schema.
+
 ### Alterado
 
 - **O nome do efeito apanhado agora é anunciado grande**, em escala 3 com sombra,
