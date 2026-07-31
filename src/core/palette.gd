@@ -38,6 +38,12 @@ const SPAWN_TELEGRAPH := Color(0.941, 0.784, 0.282) # contorno do aviso previo
 const CAPSULE := Color(0.839, 0.796, 0.643)
 const CAPSULE_SIGIL := Color(0.180, 0.145, 0.106)
 
+## Blocos fantasma (FANTASMA). Azul palido de luar, sem relacao com a cor que o
+## bloco tinha vivo: a assombracao nao pode ser confundida com o que ainda esta
+## la, so com a lembranca de que um dia esteve.
+const GHOST_COLD := Color(0.620, 0.706, 0.910)
+const GHOST_PALE := Color(0.878, 0.918, 1.0)
+
 # --- Acentos TJ-PR -----------------------------------------------------------
 const TJ_BLUE := Color(0.122, 0.306, 0.612)     # #1F4E9C
 const TJ_BLUE_LIGHT := Color(0.259, 0.478, 0.804)

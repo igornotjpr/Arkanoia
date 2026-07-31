@@ -49,7 +49,7 @@ const BONUS_POINTS := 750
 ## Travas dos escalares. Ficam aqui, e nao no ArenaLayout, porque limitam a
 ## COMPOSICAO de varios efeitos - o layout so conhece um fator de cada vez.
 const SPEED_MIN_SCALE := 0.72
-const SPEED_MAX_SCALE := 1.35
+const SPEED_MAX_SCALE := 1.60
 
 ## MULTIBOLA. Cada bola vira SPLIT_COUNT, ate o teto simultaneo. Acima de 6 a
 ## tela vira sopa e o jogador perde de vista qual bola importa.
@@ -62,10 +62,10 @@ const SPLIT_SPREAD := 0.42   # radianos entre as bolas irmas
 ## BallPhysics. Desenha um S, e nao uma espiral que orbitaria a raquete para
 ## sempre - a mesma classe de defeito que MIN_PADDLE_ANGLE existe para evitar.
 const CURVE_FREQUENCY := 3.0    # radianos por segundo de fase
-const CURVE_AMPLITUDE := 1.2    # radianos por segundo no pico
+const CURVE_AMPLITUDE := 1.5    # radianos por segundo no pico
 
 ## PARANOIA: quantas bolas falsas acompanham as verdadeiras.
-const DECOY_COUNT := 2
+const DECOY_COUNT := 3
 
 ## Catalogo. Cada entrada:
 ##   label          texto do popup ao apanhar (maiusculas, sem acento)
@@ -115,7 +115,7 @@ const EFFECTS := {
 		"duration": 10.0,
 		"risk": 2,
 		"tier": TIER_COMMON,
-		"paddle_factor": 0.70,
+		"paddle_factor": 0.40,
 		"speed_factor": 1.0,
 		"sigil": ["#...#", ".#.#.", "..#.."],
 		"shade": 0.05,
@@ -128,7 +128,7 @@ const EFFECTS := {
 		"tier": TIER_COMMON,
 		"weight": 3.0,
 		"paddle_factor": 1.0,
-		"speed_factor": 1.28,
+		"speed_factor": 1.60,
 		"sigil": ["..#..", ".###.", "#####"],
 		"shade": -0.06,
 	},

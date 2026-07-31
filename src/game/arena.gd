@@ -30,16 +30,25 @@ const CLEARED_DELAY := 2.2
 const LEVEL_INTRO_DELAY := 1.3
 const COMBO_POPUP_MIN := 3
 
-## Teto de blocos fantasma desenhados sob FANTASMA.
+## Escala do anuncio do power-up apanhado.
+const EFFECT_POPUP_SCALE := 3
+
+## FANTASMA: teto de blocos desenhados, e a animacao de assombracao.
 const GHOST_LIMIT := 60
+const GHOST_DRIFT_SPEED := 1.1    # ciclos por segundo do vaivem entre posicoes
+const GHOST_ALPHA_MIN := 0.16
+const GHOST_ALPHA_MAX := 0.50
 
 ## DIPLOPIA: deslocamento e opacidade da segunda imagem do campo.
-const HAZE_OFFSET := 5.0
-const HAZE_ALPHA := 0.38
+const HAZE_OFFSET := 11.0
+const HAZE_ALPHA := 0.52
 
-## BREU: meia altura e meia largura da janela de visao em volta da bola.
-const DARK_WINDOW := Vector2(78.0, 62.0)
-const DARK_ALPHA := 0.93
+## BREU: raio da janela de visao em volta da bola, e a espessura das faixas que
+## desenham o circulo. Passo maior deixa o circulo mais chanfrado - o que combina
+## com o resto do jogo, que e todo pixel.
+const DARK_RADIUS := 66.0
+const DARK_STEP := 4.0
+const DARK_ALPHA := 0.975
 
 var _layout: Dictionary = {}
 var _bricks: Array = []
@@ -442,8 +451,18 @@ func _hit_brick(brick: Dictionary, point: Vector2) -> void:
 	# FANTASMA: o bloco morto continua sendo desenhado. Ele nao esta em _bricks
 	# como vivo, nao esta em _targets, e nao conta para _alive_count - so existe
 	# no desenho, para o jogador nao saber mais o que ja limpou.
+	#
+	# Registrado ANTES de refazer a bijecao da MIRAGEM, de proposito: assim o
+	# destino do vaivem e a posicao que a alucinacao dava a este bloco enquanto
+	# ele ainda estava vivo.
 	if _effects.has(PowerUps.GHOST) and _ghosts.size() < GHOST_LIMIT:
-		_ghosts.append({"rect": rect, "color": color})
+		_ghosts.append({
+			"rect": rect,
+			"alt": _ghost_alt(brick, rect),
+			# Fase derivada do id, e nao do _rng: assombracao e enfeite, e nao
+			# pode consumir a aleatoriedade que decide surgimento e sorteio.
+			"phase": float(int(brick["id"])) * 0.7,
+		})
 
 	# A bijecao da MIRAGEM vale sobre os blocos VIVOS, e o conjunto acabou de
 	# mudar: sem refazer, ela apontaria para um bloco que ja nao existe.
@@ -484,6 +503,30 @@ func _visual_rect(brick: Dictionary) -> Rect2:
 ##
 ## Precisa rodar a cada morte: o conjunto de vivos muda, e uma bijecao velha
 ## apontaria para um bloco que ja nao existe.
+## Segundo ponto do vaivem de um bloco fantasma.
+##
+## Sob MIRAGEM, e a posicao que a alucinacao dava a este bloco - o fantasma
+## oscila entre onde ele estava de fato e onde a mentira o mostrava. Sem MIRAGEM
+## ativa, inventa um destino ao lado, alternando o sentido pelo id para os
+## fantasmas nao derivarem todos juntos.
+func _ghost_alt(brick: Dictionary, here: Rect2) -> Rect2:
+	var there := _visual_rect(brick)
+	if there.position.distance_squared_to(here.position) > 1.0:
+		return there
+
+	var direction := 1.0 if int(brick["id"]) % 2 == 0 else -1.0
+	var step := Vector2(here.size.x + ArenaLayout.BRICK_GAP, here.size.y * 0.4) * direction
+	var play := play_rect()
+	var target := here.position + step
+	return Rect2(
+		Vector2(
+			clampf(target.x, play.position.x, play.end.x - here.size.x),
+			clampf(target.y, play.position.y, play.end.y - here.size.y)
+		),
+		here.size
+	)
+
+
 func _rebuild_shuffle() -> void:
 	if not _effects.has(PowerUps.SHUFFLE):
 		_shuffle.clear()
@@ -678,7 +721,12 @@ func _collect(item: String) -> void:
 			split_balls()
 
 	_effects = PowerUps.apply(_effects, item)
-	_fx.popup(_paddle_center(), PowerUps.label(item), Palette.TEXT_ACCENT)
+
+	# Anuncio grande e no meio do campo: o nome do efeito e a unica informacao
+	# que o jogador recebe sobre o que acabou de apanhar, e ele precisa dar tempo
+	# de ler antes de a partida cobrar a conta.
+	_fx.popup(play_rect().get_center(), PowerUps.label(item), Palette.TEXT_ACCENT, EFFECT_POPUP_SCALE)
+	_fx.flash(Palette.TEXT_ACCENT, 0.12)
 
 	# As alucinacoes que precisam de estado montam o seu na hora da coleta.
 	match item:
@@ -846,14 +894,33 @@ func _draw() -> void:
 	_draw_message()
 
 
-## FANTASMA: blocos ja destruidos, desenhados translucidos. Vem ANTES dos vivos
-## para que um bloco vivo sempre ganhe a sobreposicao - o fantasma engana sobre o
-## que sobrou, nunca esconde o que esta la.
+## FANTASMA: blocos ja destruidos, assombrando o campo.
+##
+## Vem ANTES dos vivos para que um bloco vivo sempre ganhe a sobreposicao - o
+## fantasma engana sobre o que sobrou, nunca esconde o que esta la.
+##
+## A assombracao tem duas partes. A cor e um azul palido de luar, igual para
+## todos: um fantasma nao pode ser confundido com o bloco colorido que ainda
+## esta la. E a posicao ESMAECE entre dois lugares - o que ele ocupava e um
+## outro ponto da alucinacao -, com a opacidade pulsando junto, de modo que o
+## bloco parece ora estar aqui, ora ali, sem nunca se decidir.
 func _draw_ghosts() -> void:
 	for ghost in _ghosts:
-		var color: Color = ghost["color"]
-		color.a = 0.32
-		draw_rect(Rect2(ghost["rect"]), color, true)
+		var phase := float(ghost["phase"])
+		var wave := 0.5 + 0.5 * sin(_blink * TAU * GHOST_DRIFT_SPEED + phase)
+
+		var here: Rect2 = ghost["rect"]
+		var there: Rect2 = ghost["alt"]
+		var rect := Rect2(here.position.lerp(there.position, wave), here.size)
+
+		var color := Palette.GHOST_COLD.lerp(Palette.GHOST_PALE, wave)
+		color.a = lerpf(GHOST_ALPHA_MIN, GHOST_ALPHA_MAX, wave)
+		draw_rect(rect, color, true)
+
+		# Um filete no topo, mais claro, da a leitura de bloco em vez de mancha.
+		var edge := color
+		edge.a = color.a * 1.4
+		draw_rect(Rect2(rect.position, Vector2(rect.size.x, 1)), edge, true)
 
 
 ## DIPLOPIA: o campo desenhado uma segunda vez, deslocado e translucido.
@@ -905,18 +972,40 @@ func _draw_dark() -> void:
 
 	var focus := lowest_ball()
 	var center := area.get_center() if focus.is_empty() else Vector2(focus["pos"])
-
-	var window := Rect2(center - DARK_WINDOW, DARK_WINDOW * 2.0).intersection(area)
 	var shade := Color(0.0, 0.0, 0.0, DARK_ALPHA)
 
-	if window.size.x <= 0.0 or window.size.y <= 0.0:
-		draw_rect(area, shade, true)
-		return
+	# Janela CIRCULAR, desenhada em faixas horizontais: para cada faixa dentro do
+	# circulo, a largura do buraco e a corda naquela altura. Duas faixas cheias
+	# cobrem o resto. Sao cerca de 35 retangulos, contra os milhares que uma
+	# grade de tiles custaria num campo de 1200 px de altura.
+	var top := maxf(center.y - DARK_RADIUS, area.position.y)
+	var bottom := minf(center.y + DARK_RADIUS, area.end.y)
 
-	draw_rect(Rect2(area.position.x, area.position.y, area.size.x, window.position.y - area.position.y), shade, true)
-	draw_rect(Rect2(area.position.x, window.end.y, area.size.x, area.end.y - window.end.y), shade, true)
-	draw_rect(Rect2(area.position.x, window.position.y, window.position.x - area.position.x, window.size.y), shade, true)
-	draw_rect(Rect2(window.end.x, window.position.y, area.end.x - window.end.x, window.size.y), shade, true)
+	if top > area.position.y:
+		draw_rect(Rect2(area.position.x, area.position.y, area.size.x, top - area.position.y), shade, true)
+	if bottom < area.end.y:
+		draw_rect(Rect2(area.position.x, bottom, area.size.x, area.end.y - bottom), shade, true)
+
+	var y := top
+	while y < bottom:
+		var height := minf(DARK_STEP, bottom - y)
+
+		# Corda medida na borda da faixa mais distante do centro, para o circulo
+		# nunca comer um pedaco que deveria estar visivel.
+		var dy := maxf(absf(y - center.y), absf(y + height - center.y))
+		var half := 0.0
+		if dy < DARK_RADIUS:
+			half = sqrt(DARK_RADIUS * DARK_RADIUS - dy * dy)
+
+		var hole_left := clampf(center.x - half, area.position.x, area.end.x)
+		var hole_right := clampf(center.x + half, area.position.x, area.end.x)
+
+		if hole_left > area.position.x:
+			draw_rect(Rect2(area.position.x, y, hole_left - area.position.x, height), shade, true)
+		if hole_right < area.end.x:
+			draw_rect(Rect2(hole_right, y, area.end.x - hole_right, height), shade, true)
+
+		y += height
 
 
 func _draw_field() -> void:

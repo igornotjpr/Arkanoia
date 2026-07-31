@@ -46,10 +46,12 @@ const PADDLE_HEIGHT := 10.0
 const PADDLE_BOTTOM_OFFSET := 24.0
 const BALL_RADIUS := 4.0
 
-## Limites da largura da raquete sob efeito de power-up. Abaixo de 0.62 a raquete
-## fica menor que a bola somada a folga de rebatida e o jogo vira sorteio; acima
-## de 1.70 ela cobre um terco do campo e a fase deixa de exigir mira.
-const PADDLE_MIN_WIDTH_SCALE := 0.62
+## Limites da largura da raquete sob efeito de power-up.
+##
+## O piso de 0.40 deixa a raquete com ~30 px, quase quatro vezes o diametro da
+## bola: continua sendo mira, nao sorteio. Acima de 1.70 ela cobriria um terco do
+## campo e a fase deixaria de exigir pontaria.
+const PADDLE_MIN_WIDTH_SCALE := 0.40
 const PADDLE_MAX_WIDTH_SCALE := 1.70
 
 ## Escala de velocidade proporcional a altura do campo, para que o tempo de

@@ -8,7 +8,7 @@ global no Supabase.
 power-ups psicológicos** que embaralham a percepção do jogador sem nunca mexer na
 física. Tiros e novas fases ficam para etapas seguintes.
 
-Versão atual: **v2.1.0** — o que mudou em cada uma está em [CHANGELOG.md](CHANGELOG.md).
+Versão atual: **v2.2.0** — o que mudou em cada uma está em [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
@@ -49,8 +49,8 @@ essa a piada do nome do jogo.
 |---|---|---|
 | **LUCIDEZ** | raquete larga | −1 |
 | **CALMA** | bola lenta | −1 |
-| **PANICO** | raquete curta | +2 |
-| **SURTO** | bola rápida | +2 |
+| **PANICO** | raquete 60% mais curta | +2 |
+| **SURTO** | bola 60% mais rápida | +2 |
 
 **SURTO** sai em metade das cápsulas comuns, e **CISAO** em quase um terço das
 raras — os dois itens que mais mudam a partida são também os mais frequentes.
@@ -62,11 +62,11 @@ raras — os dois itens que mais mudam a partida são também os mais frequentes
 | **FOLEGO** | +1 vida | 0 |
 | **EUFORIA** | pontos instantâneos | 0 |
 | **CISAO** | divide cada bola em três, até seis | −1 |
-| **PARANOIA** | bolas fantasma que não colidem | +1 |
+| **PARANOIA** | três bolas fantasma que não colidem | +1 |
 | **DIPLOPIA** | o campo desenhado duas vezes, deslocado | +1 |
 | **MIRAGEM** | os blocos trocam de lugar — só visualmente | +2 |
-| **FANTASMA** | blocos destruídos continuam aparecendo | +2 |
-| **BREU** | escuridão, exceto uma janela em volta da bola | +2 |
+| **FANTASMA** | blocos destruídos assombram, em azul de luar | +2 |
+| **BREU** | escuridão, exceto um círculo em volta da bola | +2 |
 | **DERIVA** | a trajetória da bola encurva | +2 |
 | **VERTIGEM** | os comandos invertem | +3 |
 

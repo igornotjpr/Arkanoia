@@ -1252,9 +1252,17 @@ func _test_gameplay_soak() -> void:
 		_check(absf(float(slowed["elapsed"]) - float(clean["elapsed"])) > 1.0,
 			"%s: CALMA (canal de jogo) muda a partida de verdade" % label)
 
-		# CISAO: semente escolhida por ir ate o TETO de bolas em paisagem, para o
-		# refactor de multiplas bolas nao ficar sem cobertura no soak.
-		var multi := _simulate_run(viewport, 400.0, 512, "catch")
+		# CISAO precisa cair de fato em alguma partida, ou o refactor de multiplas
+		# bolas fica sem cobertura no soak.
+		#
+		# Varre algumas sementes em vez de fixar uma: qualquer ajuste de peso no
+		# sorteio muda a sequencia do rng, e uma semente cravada aqui ja quebrou
+		# tres vezes por causa de rebalanceamento, sem nada de errado no codigo.
+		var multi := {}
+		for candidate in [512, 7, 123, 17, 2026]:
+			multi = _simulate_run(viewport, 400.0, candidate, "catch")
+			if int(multi["max_balls"]) > 1:
+				break
 		_check(int(multi["max_balls"]) > 1,
 			"%s: CISAO colocou %d bolas em jogo" % [label, int(multi["max_balls"])])
 		_check(int(multi["max_balls"]) <= PowerUps.MAX_BALLS,

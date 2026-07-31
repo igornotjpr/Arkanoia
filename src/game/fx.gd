@@ -88,13 +88,15 @@ func spark(pos: Vector2, color: Color, normal: Vector2 = Vector2.ZERO) -> void:
 
 
 ## Texto que sobe e desaparece (pontos ganhos, combo).
+## Texto que sobe e some. Escalas maiores sobem mais devagar e duram mais: um
+## anuncio grande passando rapido fica ilegivel justamente quando importa.
 func popup(pos: Vector2, text: String, color: Color, scale: int = 1) -> void:
 	if _popups.size() >= MAX_POPUPS:
 		_popups.pop_front()
 	_popups.append({
 		"pos": pos,
-		"vel": Vector2(0.0, -34.0),
-		"life": 0.75,
+		"vel": Vector2(0.0, -34.0 / maxf(float(scale), 1.0)),
+		"life": 0.75 + 0.35 * float(maxi(scale, 1) - 1),
 		"age": 0.0,
 		"text": text,
 		"color": color,
@@ -174,9 +176,20 @@ func _draw() -> void:
 	for t in _popups:
 		var progress := float(t["age"]) / maxf(float(t["life"]), 0.0001)
 		var color: Color = t["color"]
-		color.a = clampf(1.0 - progress * progress, 0.0, 1.0)
+		var fade_text := clampf(1.0 - progress * progress, 0.0, 1.0)
+		color.a = fade_text
 		var pos: Vector2 = t["pos"]
-		PixelFont.draw_text_centered(self, pos.x, pos.y, str(t["text"]), int(t["scale"]), color)
+		var scale := int(t["scale"])
+		var text := str(t["text"])
+
+		# Anuncio grande ganha sombra: sem ela o texto some contra a parede de
+		# blocos coloridos, que e exatamente o fundo em que ele costuma aparecer.
+		if scale >= 2:
+			var shadow := Color(0.0, 0.0, 0.0, fade_text * 0.7)
+			var offset := float(scale)
+			PixelFont.draw_text_centered(self, pos.x + offset, pos.y + offset, text, scale, shadow)
+
+		PixelFont.draw_text_centered(self, pos.x, pos.y, text, scale, color)
 
 	if _flash > 0.0:
 		var overlay := _flash_color

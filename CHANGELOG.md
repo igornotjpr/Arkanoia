@@ -14,6 +14,45 @@ git log v1.0.0..v1.1.0     # tudo que entrou entre as duas
 
 ---
 
+## v2.2.0 — 30/07/2026
+
+Os efeitos negativos ficaram mais duros e mais legíveis.
+
+### Alterado
+
+- **O nome do efeito apanhado agora é anunciado grande**, em escala 3 com sombra,
+  no centro do campo, e fica mais tempo na tela — anúncios maiores sobem mais
+  devagar e duram mais, porque um texto grande passando rápido é ilegível
+  justamente quando importa. É a única informação que o jogador recebe sobre o
+  que acabou de pegar.
+- **SURTO**: bola de 28% para **60%** mais rápida.
+- **PANICO**: raquete de 30% para **60%** mais curta.
+- **DERIVA**: curva 25% mais acentuada.
+- **PARANOIA**: de duas para **três** bolas fantasma.
+- **DIPLOPIA**: deslocamento e opacidade da segunda imagem bem mais fortes.
+- **FANTASMA** ganhou animação de assombração: os blocos mortos passaram a ser
+  desenhados num **azul pálido de luar**, igual para todos — a assombração não
+  pode ser confundida com o bloco colorido que ainda está lá — e **esmaecem entre
+  duas posições**, a que ocupavam e a que a alucinação lhes dava, com a opacidade
+  pulsando junto. Sob MIRAGEM o destino é literalmente a posição da mentira.
+- **BREU**: a janela virou um **círculo** (desenhado em faixas horizontais, com o
+  degrau de pixel do resto do jogo) e ficou bem mais escura.
+
+Duas travas precisaram abrir para acomodar os novos valores:
+`PowerUps.SPEED_MAX_SCALE` de 1.35 para 1.60 e
+`ArenaLayout.PADDLE_MIN_WIDTH_SCALE` de 0.62 para 0.40 — a raquete no PANICO fica
+com ~30 px, quase quatro vezes o diâmetro da bola, então continua sendo mira e
+não sorteio.
+
+### Corrigido
+
+- A asserção de multibola do soak deixou de depender de uma semente cravada e
+  passou a varrer algumas: qualquer ajuste de peso muda a sequência do rng, e
+  aquela semente já tinha quebrado três vezes por rebalanceamento, sem nada de
+  errado no código.
+
+---
+
 ## v2.1.0 — 30/07/2026
 
 ### Corrigido
