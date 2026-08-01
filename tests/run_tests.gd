@@ -87,7 +87,7 @@ func _test_arena_layout() -> void:
 		# A grade de blocos precisa caber com folga dentro do campo.
 		_check(grid.position.x >= play.position.x and grid.end.x <= play.end.x + EPS,
 			"%s: grade cabe na largura do campo" % label)
-		var last_brick := ArenaLayout.brick_rect(layout, ArenaLayout.COLS - 1, ArenaLayout.ROWS - 1)
+		var last_brick := ArenaLayout.brick_rect(layout, int(layout["cols"]) - 1, int(layout["rows"]) - 1)
 		_check(last_brick.end.x <= grid.end.x + EPS,
 			"%s: ultimo bloco termina dentro da grade (%s vs %s)" % [label, last_brick.end.x, grid.end.x])
 		_check(last_brick.end.y < float(layout["paddle_y"]),
@@ -114,11 +114,13 @@ func _test_arena_layout() -> void:
 		# A altura do bloco acompanha o campo, mas dentro de limites e sempre em
 		# pixels inteiros (senao a grade nao fecha e aparecem frestas).
 		var brick_size: Vector2 = layout["brick_size"]
-		_eq(brick_size.x, ArenaLayout.BRICK_WIDTH, "%s: largura do bloco e fixa" % label)
+		var n_rows := int(layout["rows"])
+		_eq(brick_size.x, ArenaLayout.brick_width(ArenaLayout.DEFAULT_COLS),
+			"%s: largura do bloco vem de brick_width" % label)
 		_check(brick_size.y >= ArenaLayout.BRICK_MIN_HEIGHT and brick_size.y <= ArenaLayout.BRICK_MAX_HEIGHT,
 			"%s: altura do bloco dentro dos limites (%s)" % [label, brick_size.y])
 		_eq(brick_size.y, floorf(brick_size.y), "%s: altura do bloco e inteira" % label)
-		_approx(grid.size.y, ArenaLayout.ROWS * brick_size.y + (ArenaLayout.ROWS - 1) * ArenaLayout.BRICK_GAP,
+		_approx(grid.size.y, n_rows * brick_size.y + (n_rows - 1) * ArenaLayout.BRICK_GAP,
 			EPS, "%s: altura da grade bate com as linhas" % label)
 
 		# O muro nunca deve dominar o campo nem sumir dentro dele.
@@ -130,10 +132,46 @@ func _test_arena_layout() -> void:
 		_check(float(layout["paddle_y"]) - grid.end.y > 80.0,
 			"%s: sobra espaco de reacao abaixo do muro" % label)
 
-	# Larguras de brick tem que ser exatas, ou a grade nao fecha em pixels.
+	# A PROVA DE QUE LIBERAR A GEOMETRIA NAO MEXEU NO QUE JA EXISTIA.
+	# Ate a v2.2.0 a largura do bloco era a constante 50, valida so para 11 colunas.
+	# Agora ela e derivada - e em 11 colunas tem que dar exatamente 50, com a grade
+	# comecando a MIN_SIDE_MARGIN da borda, como a fase 1 sempre esteve no ar.
 	var layout_base := ArenaLayout.compute(Vector2(640, 360))
 	var brick_size: Vector2 = layout_base["brick_size"]
-	_eq(brick_size.x, ArenaLayout.BRICK_WIDTH, "brick_size.x == BRICK_WIDTH (grade fecha exata)")
+	_eq(brick_size.x, 50.0, "11 colunas continuam dando bloco de 50 px")
+	var grid_base: Rect2 = layout_base["grid"]
+	var play_base: Rect2 = layout_base["play"]
+	_approx(grid_base.position.x - play_base.position.x, ArenaLayout.MIN_SIDE_MARGIN, EPS,
+		"11 colunas continuam com a margem lateral historica")
+
+	# Grade variavel: para toda combinacao permitida, a grade tem que fechar em
+	# pixels inteiros, caber no campo e ficar centralizada. Sem isto, uma fase de
+	# 13 colunas sairia torta ou com fresta entre blocos.
+	for cols in range(ArenaLayout.MIN_COLS, ArenaLayout.MAX_COLS + 1):
+		for rows in range(ArenaLayout.MIN_ROWS, ArenaLayout.MAX_ROWS + 1):
+			for viewport in [Vector2(640, 360), Vector2(640, 1385), Vector2(853, 360), Vector2(700, 700)]:
+				var tag := "%dx%d @ %s" % [cols, rows, viewport]
+				var l := ArenaLayout.compute(viewport, cols, rows)
+				var g: Rect2 = l["grid"]
+				var p: Rect2 = l["play"]
+				var bs: Vector2 = l["brick_size"]
+
+				_eq(int(l["cols"]), cols, "%s: layout devolve as colunas pedidas" % tag)
+				_eq(int(l["rows"]), rows, "%s: layout devolve as linhas pedidas" % tag)
+				_eq(bs.x, floorf(bs.x), "%s: largura do bloco e inteira" % tag)
+				_check(bs.x >= 1.0, "%s: largura do bloco e positiva" % tag)
+				_approx(g.size.x, cols * bs.x + (cols - 1) * ArenaLayout.BRICK_GAP, EPS,
+					"%s: largura da grade fecha com as colunas" % tag)
+				_check(g.position.x >= p.position.x and g.end.x <= p.end.x + EPS,
+					"%s: grade cabe no campo" % tag)
+				_approx(g.position.x - p.position.x, p.end.x - g.end.x, 1.0,
+					"%s: grade fica centralizada no campo" % tag)
+
+				# O ultimo bloco da grade tem que terminar dentro dela, e a parede
+				# inteira tem que ficar acima da raquete.
+				var last := ArenaLayout.brick_rect(l, cols - 1, rows - 1)
+				_approx(last.end.x, g.end.x, EPS, "%s: ultimo bloco fecha na borda da grade" % tag)
+				_check(last.end.y < float(l["paddle_y"]), "%s: parede fica acima da raquete" % tag)
 
 	# Viewport menor que a base e elevada a base, nunca deixa layout invalido.
 	var tiny := ArenaLayout.compute(Vector2(120, 90))
@@ -163,8 +201,8 @@ func _test_level_builder() -> void:
 		_check(not seen_cells.has(cell), "celula %s aparece uma unica vez" % cell)
 		seen_cells[cell] = true
 
-		_check(int(brick["col"]) >= 0 and int(brick["col"]) < ArenaLayout.COLS, "coluna valida")
-		_check(int(brick["row"]) >= 0 and int(brick["row"]) < ArenaLayout.ROWS, "linha valida")
+		_check(int(brick["col"]) >= 0 and int(brick["col"]) < LevelBuilder.cols(1), "coluna valida")
+		_check(int(brick["row"]) >= 0 and int(brick["row"]) < LevelBuilder.rows(1), "linha valida")
 		_check(int(brick["hp"]) >= 1 and int(brick["hp"]) == int(brick["max_hp"]), "hp inicial == max_hp")
 		_check(int(brick["points"]) > 0, "bloco vale pontos")
 
@@ -197,16 +235,49 @@ func _test_level_builder() -> void:
 	_check(_brick_type_at(bricks, 6, 4) == LevelBuilder.TYPE_TJ_BLUE, "base do J em (6,4)")
 
 	# Fileiras de cima valem mais que as de baixo.
-	for row in range(ArenaLayout.ROWS - 1):
+	for row in range(LevelBuilder.ROW_POINTS.size() - 1):
 		_check(LevelBuilder.ROW_POINTS[row] > LevelBuilder.ROW_POINTS[row + 1],
 			"fileira %d vale mais que a %d" % [row, row + 1])
 
 	# 5000 na v1.1.0; os dois 'S' trocaram um bloco de 50 e um de 30 por 150 cada.
 	_eq(LevelBuilder.max_base_score(1), 5220, "teto base da fase 1 == 5220 pontos")
+	_eq(LevelBuilder.dimensions(1), Vector2i(11, 8), "a fase 1 continua 11x8")
 
-	# Niveis acima do ultimo mapa repetem o ultimo, sem estourar.
-	var high := LevelBuilder.build(99)
-	_eq(high.size(), bricks.size(), "fase 99 reaproveita o ultimo mapa")
+	# --- Todo mapa da rotacao ---
+	#
+	# map_is_valid nao e chamada pelo jogo: e AQUI que ela vale. Um mapa torto e
+	# erro de quem escreveu a fase, e tem que quebrar a suite em vez de degradar
+	# em silencio na tela de alguem.
+	_check(LevelBuilder.level_count() >= 2, "existe mais de uma fase (a rotacao tem o que rodar)")
+	for index in LevelBuilder.LEVELS.size():
+		var map: Array = LevelBuilder.LEVELS[index]
+		var dims := LevelBuilder.map_dimensions(map)
+		var tag := "mapa %d (%dx%d)" % [index + 1, dims.x, dims.y]
+
+		_check(LevelBuilder.map_is_valid(map), "%s: retangular, dentro dos limites e so com simbolos conhecidos" % tag)
+
+		var built := LevelBuilder.build(index + 1)
+		_check(built.size() > 0, "%s: produz blocos" % tag)
+		_check(LevelBuilder.max_base_score(index + 1) > 0, "%s: vale pontos" % tag)
+
+		var specials := 0
+		for brick in built:
+			_check(int(brick["col"]) < dims.x, "%s: coluna dentro do mapa" % tag)
+			_check(int(brick["row"]) < dims.y, "%s: linha dentro do mapa" % tag)
+			if int(brick["type"]) == LevelBuilder.TYPE_SPECIAL:
+				specials += 1
+		# Sem 'S' a fase nao solta uma capsula sequer - e o power-up e metade do jogo.
+		_check(specials >= 1, "%s: tem pelo menos um bloco especial fixo" % tag)
+
+	# A rotacao nao trava: a fase N e a fase N + level_count() usam o mesmo mapa,
+	# e fases consecutivas dentro de um ciclo usam mapas diferentes.
+	var count := LevelBuilder.level_count()
+	for level in range(1, 41):
+		_eq(LevelBuilder.build(level).size(), LevelBuilder.build(level + count).size(),
+			"fase %d e fase %d compartilham o mapa" % [level, level + count])
+	for level in range(1, count):
+		_check(LevelBuilder.map_for_level(level) != LevelBuilder.map_for_level(level + 1),
+			"fase %d e fase %d sao mapas diferentes" % [level, level + 1])
 
 
 func _brick_type_at(bricks: Array, col: int, row: int) -> int:
@@ -414,12 +485,16 @@ func _test_score_rules() -> void:
 	_eq(ScoreRules.level_clear_bonus(999, 0), ScoreRules.LEVEL_CLEAR_BONUS_CAP,
 		"bonus de fase satura no teto (protege o CHECK do schema)")
 
-	# Velocidade sobe com a fase e satura.
+	# Velocidade sobe com a fase e satura. O teto e lido do proprio saturado, e nao
+	# cravado: reafirmar o numero aqui so duplicaria a constante em dois lugares.
+	var speed_ceiling := ScoreRules.ball_speed_for_level(9999)
+	_check(speed_ceiling > ScoreRules.ball_speed_for_level(1),
+		"a velocidade sobe da fase 1 ate o teto")
 	var previous_speed := 0.0
 	for level in range(1, 40):
 		var speed := ScoreRules.ball_speed_for_level(level)
 		_check(speed >= previous_speed, "velocidade nao regride na fase %d" % level)
-		_check(speed <= 340.0 + EPS, "velocidade satura em 340 px/s")
+		_check(speed <= speed_ceiling + EPS, "velocidade satura em %.0f px/s" % speed_ceiling)
 		previous_speed = speed
 
 	_eq(ScoreRules.ball_speed_multiplier(0, 88), 1.0, "parede intacta nao acelera")
@@ -1013,31 +1088,50 @@ func _test_special_bricks() -> void:
 		"quadrado": Vector2(700, 700),
 	}
 
+	# A regra da altura minima vale para TODA geometria que uma fase pode declarar,
+	# nao so para a parede classica: uma fase de 10 fileiras deixa menos campo
+	# aberto abaixo do muro, e a faixa de surgimento tem que encolher junto.
 	for label in cases:
-		var layout := ArenaLayout.compute(cases[label])
-		var speed := Capsules.speed(layout)
-		var max_row := SpecialBricks.max_spawn_row(layout, speed)
-		var paddle_y := float(layout["paddle_y"])
+		for rows in range(ArenaLayout.MIN_ROWS, ArenaLayout.MAX_ROWS + 1):
+			var layout := ArenaLayout.compute(cases[label], ArenaLayout.DEFAULT_COLS, rows)
+			var speed := Capsules.speed(layout)
+			var max_row := SpecialBricks.max_spawn_row(layout, speed)
+			var paddle_y := float(layout["paddle_y"])
+			var tag := "%s %d linhas" % [label, rows]
 
-		_check(max_row >= ArenaLayout.ROWS - 1,
-			"%s: a parede original e sempre elegivel (row %d)" % [label, max_row])
-		_check(max_row <= ArenaLayout.ROWS - 1 + SpecialBricks.EXTRA_ROWS,
-			"%s: o surgimento nao desce indefinidamente (row %d)" % [label, max_row])
+			_check(max_row >= rows - 1,
+				"%s: a parede original e sempre elegivel (row %d)" % [tag, max_row])
+			_check(max_row <= rows - 1 + SpecialBricks.EXTRA_ROWS,
+				"%s: o surgimento nao desce indefinidamente (row %d)" % [tag, max_row])
 
-		# A REGRA QUE O USUARIO PEDIU: da fileira mais baixa possivel, a capsula
-		# ainda leva pelo menos MIN_REACTION_SECONDS ate a raquete.
-		var bottom := ArenaLayout.brick_rect(layout, 0, max_row).end.y
-		var reaction := (paddle_y - bottom) / speed
-		_check(reaction >= SpecialBricks.MIN_REACTION_SECONDS - EPS,
-			"%s: da fileira %d sobram %.2fs de reacao" % [label, max_row, reaction])
+			# A REGRA QUE O USUARIO PEDIU: da fileira mais baixa possivel, a capsula
+			# ainda leva pelo menos MIN_REACTION_SECONDS ate a raquete.
+			var bottom := ArenaLayout.brick_rect(layout, 0, max_row).end.y
+			var reaction := (paddle_y - bottom) / speed
+			_check(reaction >= SpecialBricks.MIN_REACTION_SECONDS - EPS,
+				"%s: da fileira %d sobram %.2fs de reacao" % [tag, max_row, reaction])
 
-		# E o limite e JUSTO, nao folgado: a fileira seguinte ou violaria o tempo
-		# de reacao, ou ja esta abaixo do teto de fileiras extras.
-		var next_row := max_row + 1
-		var next_bottom := ArenaLayout.brick_rect(layout, 0, next_row).end.y
-		var next_reaction := (paddle_y - next_bottom) / speed
-		_check(next_reaction < SpecialBricks.MIN_REACTION_SECONDS or next_row > ArenaLayout.ROWS - 1 + SpecialBricks.EXTRA_ROWS,
-			"%s: a fileira %d ja seria apertada demais (%.2fs) ou passa do teto" % [label, next_row, next_reaction])
+			# E o limite e JUSTO, nao folgado: a fileira seguinte ou violaria o tempo
+			# de reacao, ou ja esta abaixo do teto de fileiras extras.
+			var next_row := max_row + 1
+			var next_bottom := ArenaLayout.brick_rect(layout, 0, next_row).end.y
+			var next_reaction := (paddle_y - next_bottom) / speed
+			_check(next_reaction < SpecialBricks.MIN_REACTION_SECONDS or next_row > rows - 1 + SpecialBricks.EXTRA_ROWS,
+				"%s: a fileira %d ja seria apertada demais (%.2fs) ou passa do teto" % [tag, next_row, next_reaction])
+
+			# E O QUE JUSTIFICA ArenaLayout.MAX_ROWS: com a parede cheia ainda tem
+			# que sobrar celula livre para um bloco surgir. Sem esta folga o sorteio
+			# nunca acharia lugar e o power-up raro sumiria da fase.
+			_check(max_row >= rows,
+				"%s: sobra fileira livre abaixo da parede cheia (max_row %d)" % [tag, max_row])
+
+	# O teto de MAX_ROWS e DERIVADO, nao chutado: uma fileira a mais ja nao deixaria
+	# campo aberto abaixo do muro em paisagem, que e o formato mais apertado.
+	var over := ArenaLayout.compute(Vector2(640, 360), ArenaLayout.DEFAULT_COLS, ArenaLayout.MAX_ROWS + 2)
+	var over_max_row := SpecialBricks.max_spawn_row(over, Capsules.speed(over))
+	_check(over_max_row < ArenaLayout.MAX_ROWS + 2,
+		"%d fileiras ja sufocariam a faixa de surgimento (por isso MAX_ROWS == %d)" % [
+			ArenaLayout.MAX_ROWS + 2, ArenaLayout.MAX_ROWS])
 
 	# --- Celulas livres ---
 	var layout_base := ArenaLayout.compute(Vector2(640, 360))
@@ -1045,20 +1139,30 @@ func _test_special_bricks() -> void:
 	for brick in bricks:
 		brick["alive"] = true
 
+	var wall_cols := LevelBuilder.cols(1)
+	var wall_rows := LevelBuilder.rows(1)
 	var max_row_base := SpecialBricks.max_spawn_row(layout_base, Capsules.speed(layout_base))
-	var free := SpecialBricks.free_cells(bricks, max_row_base)
+	var free := SpecialBricks.free_cells(bricks, max_row_base, wall_cols)
 
 	# A parede da fase 1 e cheia, entao so sobram as fileiras abaixo dela.
-	var expected := (max_row_base + 1 - ArenaLayout.ROWS) * ArenaLayout.COLS
+	var expected := (max_row_base + 1 - wall_rows) * wall_cols
 	_eq(free.size(), expected, "com a parede cheia so as fileiras abaixo estao livres")
 	for cell in free:
-		_check(cell.y >= ArenaLayout.ROWS, "celula livre esta abaixo da parede cheia")
+		_check(cell.y >= wall_rows, "celula livre esta abaixo da parede cheia")
 		_check(cell.y <= max_row_base, "celula livre respeita a altura minima")
+		_check(cell.x < wall_cols, "celula livre respeita a largura da fase")
 
 	# Ao destruir um bloco, a celula dele fica disponivel.
 	bricks[0]["alive"] = false
-	var free_after := SpecialBricks.free_cells(bricks, max_row_base)
+	var free_after := SpecialBricks.free_cells(bricks, max_row_base, wall_cols)
 	_eq(free_after.size(), free.size() + 1, "bloco destruido libera a celula")
+
+	# free_cells respeita a largura da fase, e nao uma constante global: numa fase
+	# de 7 colunas o sorteio nao pode oferecer a coluna 9.
+	var narrow := SpecialBricks.free_cells([], 2, 7)
+	_eq(narrow.size(), 21, "7 colunas x 3 fileiras dao 21 celulas livres")
+	for cell in narrow:
+		_check(cell.x < 7, "celula livre nunca passa da largura pedida")
 
 	# --- Celula segura ---
 	var cell_rect := ArenaLayout.brick_rect(layout_base, 5, 9)
@@ -1309,6 +1413,40 @@ func _test_gameplay_soak() -> void:
 			label, int(multi["max_balls"]), int(multi["caught"])
 		])
 
+	# --- TODA FASE DA ROTACAO E LIMPAVEL ---------------------------------------
+	#
+	# Esta e a razao de _simulate_run ter ganhado o parametro de fase. Um mapa
+	# bonito no editor pode ser inlimpavel na pratica: um bloco encurralado onde a
+	# bola nunca chega trava a fase para sempre, e a partida so acabaria quando o
+	# jogador desistisse. Aqui a raquete e perfeita, entao "nao limpou em 400s"
+	# significa geometria ruim, nao falta de pericia.
+	#
+	# Roda nos dois formatos porque a altura do bloco muda com o campo, e uma fase
+	# de 10 fileiras se comporta de forma diferente em retrato e em paisagem.
+	for level in range(1, LevelBuilder.level_count() + 1):
+		var dims := LevelBuilder.dimensions(level)
+		for label in ["paisagem", "retrato"]:
+			var viewport := Vector2(640, 360) if label == "paisagem" else Vector2(640, 1385)
+			var tag := "fase %d (%dx%d) %s" % [level, dims.x, dims.y, label]
+			var run := _simulate_run(viewport, 400.0, 20260730, "catch", "", level)
+
+			_eq(int(run["alive"]), 0, "%s: parede inteira foi destruida" % tag)
+			_eq(int(run["lost"]), 0, "%s: raquete perfeita nunca perde a bola" % tag)
+			_check(bool(run["in_bounds"]), "%s: bola e capsulas nunca escaparam do campo" % tag)
+			_check(float(run["elapsed"]) < 400.0,
+				"%s: fase concluida dentro do orcamento (%.1fs)" % [tag, run["elapsed"]])
+			_check(int(run["score"]) > LevelBuilder.max_base_score(level),
+				"%s: pontuacao supera a base da fase" % tag)
+
+			var seconds := maxi(int(float(run["elapsed"])), 1)
+			_check(int(run["score"]) <= ScoreRules.plausible_ceiling(seconds),
+				"%s: %d pontos em %ds passa no CHECK do schema" % [tag, int(run["score"]), seconds])
+
+			print("    fase %d %dx%d/%s: %d pontos, %.1fs, %d blocos" % [
+				level, dims.x, dims.y, label, int(run["score"]), float(run["elapsed"]),
+				LevelBuilder.build(level).size()
+			])
+
 
 ## Simula uma partida usando exatamente a mesma matematica da Arena, com uma
 ## raquete automatica que persegue a bola. Sem nos, sem render, sem SceneTree.
@@ -1324,9 +1462,13 @@ func _test_gameplay_soak() -> void:
 ##   "dodge" a raquete foge das capsulas, sem deixar a bola cair
 ## forced: id de efeito mantido permanentemente ativo, para provar que uma
 ##         alucinacao do canal visual nao altera a simulacao em nada.
+## level:  fase simulada. Existe desde a v2.3.0, quando cada fase passou a ter a
+##         sua geometria: sem isto, so a parede 11x8 teria cobertura de soak e uma
+##         fase de 7x10 poderia ser inlimpavel sem ninguem descobrir.
 func _simulate_run(viewport: Vector2, max_seconds: float, seed_value: int = 0,
-		policy: String = "off", forced: String = "") -> Dictionary:
-	var layout := ArenaLayout.compute(viewport)
+		policy: String = "off", forced: String = "", level: int = 1) -> Dictionary:
+	var dims := LevelBuilder.dimensions(level)
+	var layout := ArenaLayout.compute(viewport, dims.x, dims.y)
 	var play: Rect2 = layout["play"]
 	var radius := float(layout["ball_radius"])
 	var speed_scale := float(layout["speed_scale"])
@@ -1334,7 +1476,7 @@ func _simulate_run(viewport: Vector2, max_seconds: float, seed_value: int = 0,
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed_value
 
-	var bricks := LevelBuilder.build(1)
+	var bricks := LevelBuilder.build(level)
 	for brick in bricks:
 		brick["alive"] = true
 		brick["kind"] = BallPhysics.KIND_BRICK
@@ -1364,7 +1506,7 @@ func _simulate_run(viewport: Vector2, max_seconds: float, seed_value: int = 0,
 	var capsule_size := Capsules.size(layout)
 
 	var paddle_x := play.get_center().x
-	var launch_speed := ScoreRules.ball_speed_for_level(1) * speed_scale
+	var launch_speed := ScoreRules.ball_speed_for_level(level) * speed_scale
 	var balls: Array = [{
 		"pos": ArenaLayout.docked_ball_position(layout, paddle_x),
 		"vel": BallPhysics.launch_velocity(launch_speed, 0.0),
@@ -1416,7 +1558,7 @@ func _simulate_run(viewport: Vector2, max_seconds: float, seed_value: int = 0,
 		paddle_target["rect"] = rect
 		paddle_target["vx"] = (paddle_x - previous_x) / dt
 
-		var speed := ScoreRules.ball_speed_for_level(1) * speed_scale \
+		var speed := ScoreRules.ball_speed_for_level(level) * speed_scale \
 			* ScoreRules.ball_speed_multiplier(destroyed, total) \
 			* PowerUps.ball_speed_scale(effects)
 
@@ -1524,7 +1666,7 @@ func _simulate_run(viewport: Vector2, max_seconds: float, seed_value: int = 0,
 				spawn_timer -= dt
 				if spawn_timer <= 0.0:
 					var max_row := SpecialBricks.max_spawn_row(layout, capsule_speed)
-					var cells := SpecialBricks.free_cells(bricks, max_row)
+					var cells := SpecialBricks.free_cells(bricks, max_row, int(layout["cols"]))
 					var cell := SpecialBricks.pick_cell(rng, cells, layout, balls, radius)
 					if cell.x < 0:
 						spawn_timer = SpecialBricks.RETRY_SECONDS

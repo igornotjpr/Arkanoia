@@ -23,16 +23,34 @@ const PLAY_WIDTH := 588.0     # largura interna do campo (fixa em todos os forma
 const MIN_PLAY_HEIGHT := 280.0
 const MAX_PLAY_HEIGHT := 1200.0
 
-const COLS := 11
-const ROWS := 8
-const BRICK_GAP := 2.0
-const BRICK_WIDTH := 50.0     # (588 - 2*9 - 10*2) / 11 == 50 exato
-const GRID_SIDE_MARGIN := 9.0
+## Dimensoes da parede classica, usadas como padrao por quem nao declara as suas.
+const DEFAULT_COLS := 11
+const DEFAULT_ROWS := 8
 
-## A largura do bloco e fixa, mas a ALTURA acompanha o campo: em retrato, um muro
-## de 15 px de altura viraria uma faixa fina perdida no topo de uma tela de 1200
-## px. Mantendo o muro numa fracao constante da altura, a fase tem a mesma
-## proporcao visual em qualquer formato.
+## Faixa que uma fase pode declarar. MAX_ROWS e limite de DESIGN, nao estrutural:
+## acima de 10 fileiras a parede em paisagem come a faixa livre abaixo do muro e
+## sufoca o surgimento de blocos especiais. Quem prova isso e o teste, que calcula
+## o teto em vez de confiar neste numero - ver _test_special_bricks.
+const MIN_COLS := 5
+const MAX_COLS := 16
+const MIN_ROWS := 4
+const MAX_ROWS := 10
+
+## Limites ESTRUTURAIS, so para compute() nunca dividir por zero nem produzir bloco
+## de largura negativa se receber lixo. A validacao de verdade e do LevelBuilder.
+const SAFE_MAX_COLS := 24
+const SAFE_MAX_ROWS := 24
+
+const BRICK_GAP := 2.0
+
+## Margem lateral MINIMA entre a grade e a borda do campo. A largura do bloco e
+## derivada dela; a sobra da divisao volta como margem extra, centrada.
+const MIN_SIDE_MARGIN := 9.0
+
+## A ALTURA do bloco acompanha o campo: em retrato, um muro de 15 px de altura
+## viraria uma faixa fina perdida no topo de uma tela de 1200 px. Mantendo o muro
+## numa fracao constante da altura, a fase tem a mesma proporcao visual em
+## qualquer formato.
 const WALL_HEIGHT_FRACTION := 0.28
 const BRICK_MIN_HEIGHT := 15.0
 const BRICK_MAX_HEIGHT := 34.0
@@ -60,8 +78,26 @@ const PADDLE_MAX_WIDTH_SCALE := 1.70
 const MIN_SPEED_SCALE := 0.9
 const MAX_SPEED_SCALE := 3.4
 
-## Calcula todos os retangulos do jogo para uma viewport logica dada.
-static func compute(viewport: Vector2) -> Dictionary:
+## Largura do bloco para um dado numero de colunas, em pixels inteiros.
+##
+## E DERIVADA, e nao uma constante, porque a fase declara as proprias colunas. O
+## piso garante que a grade feche em pixel: a sobra da divisao vira margem lateral
+## extra em compute(), em vez de virar fresta entre blocos.
+##
+## Em 11 colunas isto devolve exatamente 50 - a largura fixa que o jogo usou ate a
+## v2.2.0 -, o que mantem a fase 1 identica ao que ja estava no ar.
+static func brick_width(cols: int) -> float:
+	var n := maxi(cols, 1)
+	var usable := PLAY_WIDTH - MIN_SIDE_MARGIN * 2.0
+	return maxf(floorf((usable - BRICK_GAP * float(n - 1)) / float(n)), 1.0)
+
+
+## Calcula todos os retangulos do jogo para uma viewport logica e uma dimensao de
+## fase. Sem argumentos de grade, devolve a parede classica de 11x8.
+static func compute(viewport: Vector2, cols: int = DEFAULT_COLS, rows: int = DEFAULT_ROWS) -> Dictionary:
+	var n_cols := clampi(cols, 1, SAFE_MAX_COLS)
+	var n_rows := clampi(rows, 1, SAFE_MAX_ROWS)
+
 	var vw := maxf(viewport.x, DESIGN_WIDTH)
 	var vh := maxf(viewport.y, DESIGN_HEIGHT)
 
@@ -74,20 +110,28 @@ static func compute(viewport: Vector2) -> Dictionary:
 
 	# Altura do bloco derivada da altura do campo, arredondada para baixo para a
 	# grade fechar em pixels inteiros.
-	var wall_budget := play_h * WALL_HEIGHT_FRACTION - BRICK_GAP * (ROWS - 1)
-	var brick_h := floorf(clampf(wall_budget / float(ROWS), BRICK_MIN_HEIGHT, BRICK_MAX_HEIGHT))
+	var wall_budget := play_h * WALL_HEIGHT_FRACTION - BRICK_GAP * float(n_rows - 1)
+	var brick_h := floorf(clampf(wall_budget / float(n_rows), BRICK_MIN_HEIGHT, BRICK_MAX_HEIGHT))
+	var brick_w := brick_width(n_cols)
 
 	var grid_top := floorf(clampf(play_h * GRID_TOP_FRACTION, GRID_TOP_MIN, GRID_TOP_MAX))
-	var grid_w := PLAY_WIDTH - GRID_SIDE_MARGIN * 2.0
-	var grid_h := ROWS * brick_h + (ROWS - 1) * BRICK_GAP
+	var grid_w := float(n_cols) * brick_w + float(n_cols - 1) * BRICK_GAP
+	var grid_h := float(n_rows) * brick_h + float(n_rows - 1) * BRICK_GAP
+
+	# A grade e centralizada no campo: com 11 colunas a sobra e zero e a margem da
+	# exatamente MIN_SIDE_MARGIN, mas numa fase de 7 ou 15 colunas o resto da
+	# divisao precisa ir para as duas laterais, senao a parede sai torta.
+	var grid_x := play.position.x + floorf((PLAY_WIDTH - grid_w) * 0.5)
 
 	return {
 		"viewport": Vector2(vw, vh),
 		"hud": Rect2(0.0, 0.0, vw, HUD_HEIGHT),
 		"play": play,
 		"frame": Rect2(play.position - Vector2(FRAME, FRAME), play.size + Vector2(FRAME, FRAME) * 2.0),
-		"grid": Rect2(play.position.x + GRID_SIDE_MARGIN, play.position.y + grid_top, grid_w, grid_h),
-		"brick_size": Vector2(BRICK_WIDTH, brick_h),
+		"grid": Rect2(grid_x, play.position.y + grid_top, grid_w, grid_h),
+		"brick_size": Vector2(brick_w, brick_h),
+		"cols": n_cols,
+		"rows": n_rows,
 		"paddle_size": Vector2(PADDLE_WIDTH, PADDLE_HEIGHT),
 		"paddle_y": play.end.y - PADDLE_BOTTOM_OFFSET,
 		"ball_radius": BALL_RADIUS,

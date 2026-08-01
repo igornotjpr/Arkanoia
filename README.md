@@ -4,11 +4,12 @@ Clone de Arkanoid em Godot 4.6, para embutir na seção secreta de jogos do proj
 de ferramentas do TJ-PR. Roda em navegador desktop e mobile, com leaderboard
 global no Supabase.
 
-**Uma fase, gráficos e efeitos completos, lógica testada, e um cardápio de
-power-ups psicológicos** que embaralham a percepção do jogador sem nunca mexer na
-física. Tiros e novas fases ficam para etapas seguintes.
+**Seis fases com geometrias diferentes, gráficos e efeitos completos, lógica
+testada, e um cardápio de power-ups psicológicos** que embaralham a percepção do
+jogador sem nunca mexer na física. Tiros e barreiras móveis ficam para etapas
+seguintes.
 
-Versão atual: **v2.2.0** — o que mudou em cada uma está em [CHANGELOG.md](CHANGELOG.md).
+Versão atual: **v2.3.0** — o que mudou em cada uma está em [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
@@ -115,12 +116,28 @@ emboscada.
 
 ### Progressão
 
-A fase 1 tem 88 blocos em 11×8. Ao limpar a parede, o jogo avança de fase com o
-mesmo mapa e bola mais rápida — o placar é a métrica, não o "final". O combo
-multiplica os pontos em até 4× enquanto a bola não voltar à raquete.
+Seis fases, cada uma com a sua forma **e a sua grade**:
 
-Dez blocos reforçados azuis desenham as letras **T** e **J** no meio da parede, e
-dois blocos dourados valem 200 pontos. Ao limpar a fase aparece uma mensagem
+| # | Nome | Grade | Ideia |
+|---|---|---|---|
+| 1 | — | 11×8 | a parede cheia clássica, com o "TJ" escondido |
+| 2 | ARCO | 11×8 | nave de catedral: centro oco, pilares grossos |
+| 3 | FUNIL | 13×9 | losango afunilando até o dourado no meio |
+| 4 | FORTALEZA | 11×9 | dois anéis com portões em volta de um núcleo |
+| 5 | CORREDOR | 7×10 | a parede mais estreita e alta; blocos de 79 px |
+| 6 | CHUVA | 15×8 | trama diagonal na parede mais larga; blocos de 36 px |
+
+Depois da sexta a lista **rotaciona**, com a bola mais rápida a cada fase — o
+placar é a métrica, não o "final". O combo multiplica os pontos em até 4×
+enquanto a bola não voltar à raquete.
+
+A largura do bloco é **derivada** do número de colunas, e a sobra da divisão vira
+margem lateral centrada. É isso que permite 7 e 15 colunas conviverem sem fresta
+entre blocos: até a v2.2.0 a largura era a constante `50`, que só fecha em pixel
+exato com 11 colunas.
+
+Dez blocos reforçados azuis desenham as letras **T** e **J** no meio da fase 1, e
+os blocos dourados valem 200 pontos. Ao limpar a fase aparece uma mensagem
 rotativa (`AUTOS BAIXADOS`, `TRANSITADO EM JULGADO`, ...).
 
 ---
@@ -205,15 +222,21 @@ godot --headless --path . -- --arkanoia-selftest
 > processamento, então com o relógio acelerado a chamada ao Supabase expira em
 > ~0,1 s reais e o teste do caminho HTTP fica inconclusivo (`TEMPO ESGOTADO`).
 
-**Suíte pura** (2244 asserções): layout nos quatro formatos, física da bola
-(reflexão, antitunelamento, ângulo da raquete, componente vertical mínimo),
-construção da fase, pontuação, sanitização do nick, cobertura de glifos para
-**todo** texto que o jogo escreve na tela, e construção das URLs do Supabase.
+**Suíte pura** (7432 asserções): layout nos quatro formatos e em **toda** grade
+permitida (5–16 colunas × 4–10 fileiras), física da bola (reflexão,
+antitunelamento, ângulo da raquete, componente vertical mínimo), construção das
+fases, pontuação, sanitização do nick, cobertura de glifos para **todo** texto
+que o jogo escreve na tela, e construção das URLs do Supabase.
 
 Termina com um **soak test** que simula partidas completas em paisagem e retrato
 usando exatamente a mesma matemática do jogo, com uma raquete automática
 perfeita. Ele exige que a parede inteira caia, que a bola nunca escape do campo,
 e que o placar resultante passe no `CHECK` de plausibilidade do schema SQL.
+
+Desde a v2.3.0 ele roda **todas as fases**, e não só a primeira. É o que impede
+um mapa bonito no editor de ser inlimpável em jogo: com uma raquete perfeita,
+"não limpou em 400 s" só pode ser geometria ruim. Duas fases nasceram lentas
+demais e foram corrigidas por causa dele antes de sair.
 
 Esse soak test encontrou dois defeitos reais durante o desenvolvimento:
 
@@ -358,9 +381,15 @@ Depois embuta na página do TJ-PR seguindo `web/exemplo-embed.html`.
 
 Ordem sugerida, do mais barato ao mais caro:
 
-1. **Mais fases**: adicionar mapas em `LevelBuilder.LEVELS`. O formato é texto de
-   11×8 e a suíte já valida qualquer fase nova.
-2. **Laser**: a raquete atira. O `InputSetup.LAUNCH` já existe e não faz nada
+1. **Mais fases**: acrescentar um mapa em `LevelBuilder.LEVELS`. É texto puro, de
+   5×4 a 16×10, e a suíte valida a fase nova sozinha — inclusive rodando um soak
+   completo nela nos dois formatos, que é o que pega um mapa inlimpável.
+2. **Barreiras móveis e lançamento múltiplo**: planejado. A física já aceita alvo
+   com retângulo móvel sem alteração nenhuma (`BallPhysics.advance` relê
+   `target["rect"]` a cada chamada), mas exige um `KIND_SOLID` com tipo de evento
+   próprio — id de texto num evento `"brick"` indexaria um bloco real, porque
+   `int("m1")` vale 1.
+3. **Laser**: a raquete atira. O `InputSetup.LAUNCH` já existe e não faz nada
    durante a partida, então é o gatilho natural.
 3. **Mais alucinações**: DELIRIO (o HUD mostra pontos e vidas errados), ECO (o
    rastro da bola não apaga), SOSIA (uma segunda raquete falsa). Todas baratas —

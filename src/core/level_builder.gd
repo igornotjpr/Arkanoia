@@ -1,19 +1,28 @@
 ## Construcao de fases a partir de mapas em texto. Codigo puro e testavel.
 ##
-## Legenda dos mapas (11 colunas x 8 linhas):
+## Legenda dos mapas:
 ##   '.'      celula vazia
 ##   '0'-'7'  bloco comum de 1 hp, cor da fileira indicada
 ##   'B'      bloco reforcado azul TJ-PR, 2 hp
 ##   'G'      bloco dourado TJ-PR, 2 hp, pontuacao alta
 ##   'S'      bloco especial, 2 hp, solta uma capsula de power-up ao morrer
 ##
+## O MAPA E A DECLARACAO DA GEOMETRIA
+## ----------------------------------
+## Ate a v2.2.0 toda fase era 11x8, porque a largura do bloco era a constante
+## ArenaLayout.BRICK_WIDTH = 50, que so fecha em pixel exato com 11 colunas. Agora
+## a largura e derivada (ArenaLayout.brick_width), entao cada fase pode ter a sua
+## dimensao - e ela nao e declarada em lugar nenhum: sai do proprio desenho, com
+## rows = numero de linhas e cols = comprimento da linha. Um mapa e sua unica
+## fonte de verdade, e nao ha como o desenho e a dimensao divergirem.
+##
+## Quem garante que os mapas sao retangulares e cabem nos limites e o teste, via
+## map_is_valid() - ver _test_level_builder.
+##
 ## A fase 1 desenha discretamente as letras "T" e "J" com blocos reforcados no
 ## meio da parede - o easter egg fica visivel apenas para quem presta atencao.
 class_name LevelBuilder
 extends RefCounted
-
-const COLS := ArenaLayout.COLS
-const ROWS := ArenaLayout.ROWS
 
 const TYPE_NORMAL := 0
 const TYPE_TJ_BLUE := 1
@@ -27,6 +36,11 @@ const TYPE_SPECIAL := 3
 const TYPE_SPECIAL_SPAWNED := 4
 
 ## Pontos base por fileira (topo vale mais, como no original).
+##
+## Tem 8 entradas de proposito, mesmo com fases de ate 10 fileiras: as fileiras
+## extras ficam no VALOR MINIMO. Elas sao as mais baixas e portanto as mais faceis
+## de acertar, entao dar a elas uma faixa de pontos propria premiaria o alvo mais
+## simples da parede.
 const ROW_POINTS: Array[int] = [80, 70, 60, 50, 40, 30, 20, 10]
 
 const TJ_BLUE_POINTS := 120
@@ -35,8 +49,16 @@ const TJ_GOLD_POINTS := 200
 const SPECIAL_HP := 2
 const SPECIAL_POINTS := 150
 
+## Simbolos aceitos num mapa. Existe para map_is_valid() pegar um caractere
+## digitado errado, que build() trataria como bloco comum sem reclamar.
+const SYMBOLS := [".", "0", "1", "2", "3", "4", "5", "6", "7", "B", "G", "S"]
+
 ## Os dois 'S' ocupam o lugar de blocos comuns nas pontas, longe das colunas que
 ## desenham o "T" e o "J" com blocos reforcados - o easter egg fica intacto.
+##
+## 11x8, e assim tem que continuar: e a fase que ja esta no ar desde a v1.0.0, e as
+## assercoes de 88 blocos e 5220 pontos sao a prova de que liberar a geometria nao
+## mexeu no que ja existia.
 const LEVEL_1 := [
 	"00000000000",
 	"11111111111",
@@ -48,7 +70,93 @@ const LEVEL_1 := [
 	"77777777777",
 ]
 
-const LEVELS := [LEVEL_1]
+## ARCO - 11x8. Nave de catedral: o centro e oco e os pilares sao grossos. A bola
+## entra pelas laterais do topo e passa a ricochetear dentro do vao.
+const LEVEL_ARCO := [
+	"...BBBBB...",
+	"..1111111..",
+	".22.....22.",
+	"33.......33",
+	"44.......44",
+	"S5.......5S",
+	"66.......66",
+	"GG.......GG",
+]
+
+## FUNIL - 13x9. Losango: denso no topo, afunilando ate o dourado no meio, e com
+## duas torres reforcadas embaixo para a fase nao terminar sozinha.
+const LEVEL_FUNIL := [
+	"0000000000000",
+	".11111111111.",
+	"..222222222..",
+	"...3333333...",
+	"....44444....",
+	".....SGS.....",
+	"....66666....",
+	"...7777777...",
+	"..BB.....BB..",
+]
+
+## FORTALEZA - 11x9. Dois aneis em volta de um nucleo dourado. E a unica fase em
+## que a ordem importa: da para entrar pelos portoes, mas o ouro so cai depois de
+## abrir caminho ate o centro.
+##
+## Os aneis tem VAOS de proposito. Fechados, o soak levava 300s em paisagem contra
+## 242s da fase 1: a bola gastava a partida inteira raspando a muralha externa sem
+## nunca alcancar o miolo. Os portoes deixam a bola entrar cedo e transformam a
+## fase em navegacao, que era a ideia, em vez de escavacao.
+const LEVEL_FORTALEZA := [
+	"BBBB...BBBB",
+	"B.........B",
+	"B.33...33.B",
+	"B.3.....3.B",
+	"B.3.GGG.3.B",
+	"B.3.....3.B",
+	"B.33...33.B",
+	"B.........B",
+	"SBBB...BBBS",
+]
+
+## CORREDOR - 7x10. A parede mais estreita e mais alta do jogo. Com 7 colunas o
+## bloco fica com 79 px de largura, entao cada acerto conta muito mais.
+const LEVEL_CORREDOR := [
+	"BBBBBBB",
+	"0000000",
+	"11...11",
+	"S22222S",
+	"33...33",
+	"4444444",
+	"55...55",
+	"G66666G",
+	"77...77",
+	"BBBBBBB",
+]
+
+## CHUVA - 15x8. Faixas diagonais na parede mais larga do jogo. Os blocos ficam com
+## 36 px, e as diagonais mantem trechos continuos - diferente de um xadrez, onde
+## cada bloco seria uma ilha e a bola passaria a vida inteira pelos vaos.
+const LEVEL_CHUVA := [
+	".000.000.000.00",
+	"111.111.111.111",
+	"S2.222.222.222.",
+	"3.333.333.333.3",
+	".GG4.444.444.44",
+	"555.555.555.55S",
+	"66.666.666.666.",
+	"7.777.777.777.7",
+]
+
+## A ordem e a progressao: a classica, uma fase arejada para o jogador respirar,
+## e dai subindo em densidade ate a fortaleza. Depois da ultima a lista ROTACIONA
+## (ver map_for_level) - a dificuldade continua subindo pela velocidade da bola.
+const LEVELS := [
+	LEVEL_1,
+	LEVEL_ARCO,
+	LEVEL_FUNIL,
+	LEVEL_FORTALEZA,
+	LEVEL_CORREDOR,
+	LEVEL_CHUVA,
+]
 
 ## Mensagem exibida ao limpar a parede - o easter egg juridico do TJ-PR.
 ## Fica aqui, e nao na Arena, para ser conteudo de fase testavel sem SceneTree.
@@ -73,13 +181,55 @@ static func level_count() -> int:
 	return LEVELS.size()
 
 
-## Mapa da fase pedida. Fases alem da ultima repetem a ultima (dificuldade sobe
-## pela velocidade da bola, tratado em GameState).
+## Mapa da fase pedida. Depois da ultima a lista ROTACIONA, no mesmo padrao que
+## clear_message ja usa - antes disto um clampi travava na ultima fase e o jogo
+## repetia o mesmo mapa para sempre.
 static func map_for_level(level: int) -> Array:
 	if LEVELS.is_empty():
 		return []
-	var index := clampi(level - 1, 0, LEVELS.size() - 1)
-	return LEVELS[index]
+	return LEVELS[posmod(maxi(level, 1) - 1, LEVELS.size())]
+
+
+## Numero de colunas e de linhas da fase, lidos do proprio mapa.
+static func dimensions(level: int) -> Vector2i:
+	return map_dimensions(map_for_level(level))
+
+
+static func map_dimensions(map: Array) -> Vector2i:
+	if map.is_empty():
+		return Vector2i.ZERO
+	return Vector2i(String(map[0]).length(), map.size())
+
+
+static func cols(level: int) -> int:
+	return dimensions(level).x
+
+
+static func rows(level: int) -> int:
+	return dimensions(level).y
+
+
+## True quando o mapa e retangular e cabe nos limites de geometria.
+##
+## Nao e chamada por build(): e o TESTE que a roda sobre LEVELS inteiro. Deixar a
+## validacao fora do caminho quente e deliberado - um mapa torto e erro de quem
+## escreveu a fase, e tem que quebrar a suite, nao degradar em silencio no jogo.
+static func map_is_valid(map: Array) -> bool:
+	var dims := map_dimensions(map)
+	if dims.x < ArenaLayout.MIN_COLS or dims.x > ArenaLayout.MAX_COLS:
+		return false
+	if dims.y < ArenaLayout.MIN_ROWS or dims.y > ArenaLayout.MAX_ROWS:
+		return false
+
+	for line in map:
+		var text := String(line)
+		if text.length() != dims.x:
+			return false
+		for index in text.length():
+			if not SYMBOLS.has(text[index]):
+				return false
+
+	return true
 
 
 ## Constroi a lista de blocos da fase.
@@ -91,9 +241,11 @@ static func build(level: int) -> Array:
 	var bricks: Array = []
 	var next_id := 0
 
-	for row in range(min(ROWS, map.size())):
+	# A dimensao vem do mapa, nao de constante: e o que permite fases de 7x10 e
+	# 15x8 conviverem na mesma lista.
+	for row in range(map.size()):
 		var line: String = map[row]
-		for col in range(min(COLS, line.length())):
+		for col in range(line.length()):
 			var symbol := line[col]
 			if symbol == ".":
 				continue

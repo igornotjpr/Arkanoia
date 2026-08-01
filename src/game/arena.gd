@@ -135,7 +135,7 @@ func _ready() -> void:
 	_fx = Fx.new()
 	add_child(_fx)
 
-	_layout = ArenaLayout.compute(get_viewport_rect().size)
+	_refresh_layout()
 	_paddle_x = play_rect().get_center().x
 	_paddle_prev_x = _paddle_x
 
@@ -143,10 +143,26 @@ func _ready() -> void:
 	start_level()
 
 
+## Recalcula o layout para a viewport e para a GEOMETRIA DA FASE ATUAL.
+##
+## As dimensoes saem de GameState.level a cada chamada, em vez de ficarem guardadas
+## num campo: sao dois os pontos que recalculam o layout (fase nova e giro de tela)
+## e, com estado proprio, bastaria um deles esquecer de atualizar para a grade
+## desenhada divergir da grade em que a bola bate.
+func _refresh_layout() -> void:
+	var dims := LevelBuilder.dimensions(GameState.level)
+	_layout = ArenaLayout.compute(get_viewport_rect().size, dims.x, dims.y)
+
+
 ## --- Ciclo de vida da fase -------------------------------------------------
 
 ## Monta a fase atual de GameState e encaixa a bola na raquete.
 func start_level() -> void:
+	# Antes de qualquer coisa: a fase nova pode ter outra grade, e quem chama isto
+	# ja rodou GameState.advance_level(). Sem este recalculo os retangulos abaixo
+	# sairiam com as dimensoes da fase anterior.
+	_refresh_layout()
+
 	_bricks = LevelBuilder.build(GameState.level)
 	for brick in _bricks:
 		brick["alive"] = true
@@ -642,7 +658,7 @@ func _update_spawn(delta: float) -> void:
 		return
 
 	var max_row := SpecialBricks.max_spawn_row(_layout, Capsules.speed(_layout))
-	var cells := SpecialBricks.free_cells(_bricks, max_row)
+	var cells := SpecialBricks.free_cells(_bricks, max_row, int(_layout["cols"]))
 	var cell := SpecialBricks.pick_cell(
 		_rng, cells, _layout, _balls, float(_layout["ball_radius"])
 	)
@@ -847,7 +863,7 @@ func _input(event: InputEvent) -> void:
 
 func _on_viewport_resized() -> void:
 	var old_play := play_rect()
-	_layout = ArenaLayout.compute(get_viewport_rect().size)
+	_refresh_layout()
 	var new_play := play_rect()
 
 	for brick in _bricks:

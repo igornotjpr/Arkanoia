@@ -1,9 +1,14 @@
 # Changelog
 
 Versionamento semântico: `MAJOR.MINOR.PATCH`. Neste projeto, **MAJOR** muda
-quando o jogo ganha um marco de conteúdo (as alucinações, novas fases), **MINOR**
-quando entra comportamento novo dentro do marco atual, e **PATCH** quando é só
-correção.
+quando o jogo ganha um marco de mecânica (as alucinações; o chefe, quando vier),
+**MINOR** quando entra comportamento novo dentro do marco atual, e **PATCH**
+quando é só correção.
+
+> "Novas fases" saiu dos exemplos de MAJOR na v2.3.0. Até ali, acrescentar uma
+> fase exigia mexer no motor — a grade era fixa em 11×8 e `map_for_level` travava
+> no último mapa. Depois da geometria variável e da rotação, uma fase nova é um
+> mapa em texto que a suíte valida sozinha: conteúdo de rotina, não marco.
 
 Cada versão é uma tag anotada em `main`. Para ver o que uma tag carrega:
 
@@ -11,6 +16,58 @@ Cada versão é uma tag anotada em `main`. Para ver o que uma tag carrega:
 git show v1.1.0            # a anotação e o commit
 git log v1.0.0..v1.1.0     # tudo que entrou entre as duas
 ```
+
+---
+
+## v2.3.0 — 01/08/2026
+
+O jogo deixou de ser uma fase só.
+
+### Por que
+
+`LevelBuilder.LEVELS` tinha **um** mapa, e `map_for_level` usava `clampi`: a fase
+7 era a fase 1 com a bola mais rápida. Somando a isso a velocidade saturando na
+fase 9 e o bônus de fase na fase 5, **a partir da fase 9 o jogo era
+matematicamente idêntico a si mesmo para sempre.**
+
+### Adicionado
+
+- **Geometria por fase.** A largura do bloco deixou de ser a constante `50` — que
+  só fechava em pixel exato com 11 colunas — e passou a ser derivada em
+  `ArenaLayout.brick_width(cols)`. Cada fase declara a própria grade, de 5×4 a
+  16×10, e a sobra da divisão vira margem lateral centrada. Em 11 colunas o
+  resultado é exatamente o de antes: bloco de 50 px, margem de 9 px.
+- **Cinco fases novas**, cada uma com uma forma e uma dimensão: `ARCO` (11×8),
+  `FUNIL` (13×9), `FORTALEZA` (11×9), `CORREDOR` (7×10) e `CHUVA` (15×8).
+- **Rotação de mapas.** Depois da última fase a lista recomeça, no mesmo padrão
+  que `clear_message` já usava.
+
+### Alterado
+
+- Velocidade da bola: passo por fase de 18 para 20 px/s, teto de 340 para 380.
+- Teto do bônus de fase de 5000 para 8000, para as fases altas continuarem pagando.
+- `SpecialBricks` lê a geometria do layout em vez de constantes globais, então a
+  regra da altura mínima vale para qualquer parede — inclusive as de 10 fileiras,
+  que deixam menos campo aberto abaixo do muro.
+
+### Testes
+
+- O soak ganhou o parâmetro de fase e **roda todas as fases nos dois formatos**.
+  É o que impede um mapa bonito de ser inlimpável: com uma raquete perfeita, "não
+  limpou em 400 s" só pode ser geometria ruim.
+- Varredura de toda combinação de grade permitida (5–16 colunas × 4–10 fileiras ×
+  4 viewports): a grade fecha em pixels inteiros, cabe no campo e fica centrada.
+- O teto de `MAX_ROWS` é **derivado**: o teste prova que duas fileiras a mais já
+  sufocariam a faixa de surgimento dos blocos especiais.
+- As asserções da fase 1 (88 blocos, 5220 pontos, células exatas do "TJ")
+  continuam intactas — são elas que provam que liberar a grade não mexeu no que
+  já estava no ar.
+
+Dois defeitos de balanceamento apareceram no soak e foram corrigidos antes de
+sair: a `FORTALEZA` com os anéis fechados levava 300 s (a bola raspava a muralha
+sem alcançar o miolo — ganhou portões, caiu para 114 s), e a `CHUVA` esparsa
+levava 270 s porque os vãos diagonais se alinhavam em canais (ficou mais densa,
+90 blocos em 171 s).
 
 ---
 

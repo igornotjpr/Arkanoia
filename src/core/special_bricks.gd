@@ -8,7 +8,7 @@
 ## ------------------------
 ## O pedido era que o bloco nao aparecesse baixo demais, a ponto de a capsula
 ## chegar antes de o jogador ter tempo de decidir. Se o surgimento ficasse restrito
-## a parede 11x8, a regra jamais dispararia: a parede termina a mais de 80 px da
+## a propria parede, a regra jamais dispararia: a parede termina a mais de 80 px da
 ## raquete em qualquer formato, o que ja da mais de 1,5 s de queda.
 ##
 ## A regra so vira real porque o bloco PODE surgir abaixo da parede, no campo
@@ -48,19 +48,24 @@ const LOOKAHEAD_SAMPLES := 8
 
 ## Fileira mais baixa em que um bloco pode surgir, dado o layout e a velocidade
 ## de queda da capsula.
+##
+## O fundo da parede vem de layout["rows"], e nao de constante: com a geometria
+## por fase, uma fase de 10 fileiras tem menos campo aberto abaixo do muro que uma
+## de 8, e a faixa de surgimento precisa encolher junto.
 static func max_spawn_row(layout: Dictionary, capsule_speed: float) -> int:
-	var ceiling := ArenaLayout.ROWS - 1 + EXTRA_ROWS
+	var wall_rows := int(layout.get("rows", ArenaLayout.DEFAULT_ROWS))
+	var ceiling := wall_rows - 1 + EXTRA_ROWS
 	if capsule_speed <= 0.0:
-		return ArenaLayout.ROWS - 1
+		return wall_rows - 1
 
 	var paddle_y := float(layout["paddle_y"])
-	for row in range(ceiling, ArenaLayout.ROWS - 2, -1):
+	for row in range(ceiling, wall_rows - 2, -1):
 		var bottom := ArenaLayout.brick_rect(layout, 0, row).end.y
 		if (paddle_y - bottom) / capsule_speed >= MIN_REACTION_SECONDS:
 			return row
 
 	# A parede original e sempre elegivel: ela ja existe ali de qualquer forma.
-	return ArenaLayout.ROWS - 1
+	return wall_rows - 1
 
 
 ## Intervalo ate o proximo sorteio.
@@ -68,8 +73,8 @@ static func next_interval(rng: RandomNumberGenerator) -> float:
 	return rng.randf_range(ROLL_INTERVAL_MIN, ROLL_INTERVAL_MAX)
 
 
-## Celulas sem bloco vivo, de row 0 ate max_row.
-static func free_cells(bricks: Array, max_row: int) -> Array:
+## Celulas sem bloco vivo, de row 0 ate max_row, na largura da fase atual.
+static func free_cells(bricks: Array, max_row: int, cols: int) -> Array:
 	var taken := {}
 	for brick in bricks:
 		if bool(brick["alive"]):
@@ -77,7 +82,7 @@ static func free_cells(bricks: Array, max_row: int) -> Array:
 
 	var cells: Array = []
 	for row in range(0, max_row + 1):
-		for col in range(ArenaLayout.COLS):
+		for col in range(maxi(cols, 0)):
 			var cell := Vector2i(col, row)
 			if not taken.has(cell):
 				cells.append(cell)

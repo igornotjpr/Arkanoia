@@ -16,7 +16,12 @@ const LEVEL_CLEAR_BONUS := 1000
 
 ## Teto do bonus de fase. Sem o teto, o bonus cresceria sem limite com o nivel e
 ## quebraria o CHECK de plausibilidade do schema (pontos por segundo de partida).
-const LEVEL_CLEAR_BONUS_CAP := 5000
+##
+## Subiu de 5000 para 8000 na v2.3.0, junto com a rotacao de mapas: saturar na fase
+## 5 fazia a 6a fase em diante pagar o mesmo que a 5a, e o bonus deixava de premiar
+## quem foi longe. Continua bem abaixo de PLAUSIBLE_BASE, entao o pagamento maximo
+## (8000 + 5 vidas * 500 = 10500) cabe com folga no termo aditivo do teto.
+const LEVEL_CLEAR_BONUS_CAP := 8000
 
 ## Limite superior aceito pelo leaderboard. Precisa bater com o CHECK do
 ## schema SQL no Supabase (ver supabase/schema.sql).
@@ -93,8 +98,13 @@ static func level_clear_bonus(level: int, lives_left: int) -> int:
 
 ## Velocidade da bola para uma fase, antes da escala de layout.
 ## Sobe de forma suave e satura, para a fase nunca virar ingogavel.
+##
+## O passo subiu de 18 para 20 e o teto de 340 para 380 na v2.3.0: com uma fase so,
+## saturar na 9 nao tinha custo, mas com a rotacao de mapas o jogador chega bem
+## alem disso e o jogo parava de mudar. O teto continua existindo - depois dele a
+## variacao vem da forma da parede, nao da velocidade.
 static func ball_speed_for_level(level: int) -> float:
-	return minf(200.0 + (maxi(level, 1) - 1) * 18.0, 340.0)
+	return minf(200.0 + (maxi(level, 1) - 1) * 20.0, 380.0)
 
 
 ## Aceleracao progressiva dentro da fase: a bola ganha velocidade conforme a
