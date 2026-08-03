@@ -102,6 +102,20 @@ var _rng := RandomNumberGenerator.new()
 var _effects: Dictionary = {}
 
 var _capsules: Array = []
+
+## Barreiras moveis da fase. Alvos solidos: rebatem, nao sofrem dano, nao pontuam.
+var _movers: Array = []
+
+## Quantas bolas vao ao campo no proximo lancamento. Cada uma alem da primeira
+## custa uma vida, cobrada so no lancamento. Volta a 1 a cada encaixe.
+var _stake := 1
+
+## Botao de aposta, desenhado no campo enquanto a bola esta encaixada.
+##
+## Existe para o toque: no celular nao ha tecla S, e sem um alvo tocavel a
+## mecanica simplesmente nao existiria em metade dos aparelhos. Fica no campo, e
+## nao no HUD, porque o HUD so redesenha por sinal e a aposta muda por clique.
+var _stake_button := Rect2()
 var _capsule_serial := 0
 
 var _spawn_timer := 0.0
@@ -170,6 +184,8 @@ func start_level() -> void:
 		brick["kind"] = BallPhysics.KIND_BRICK
 		brick["rect"] = ArenaLayout.brick_rect(_layout, int(brick["col"]), int(brick["row"]))
 
+	_movers = Movers.build(LevelBuilder.movers_for_level(GameState.level), _layout)
+
 	_alive_count = _bricks.size()
 	GameState.bricks_total = _alive_count
 	_fx.clear()
@@ -203,8 +219,61 @@ func dock_ball() -> void:
 	_paddle_x = ArenaLayout.paddle_rect(_layout, _paddle_x, _paddle_scale()).get_center().x
 	_paddle_prev_x = _paddle_x
 	_paddle_vx = 0.0
-	_balls = [_make_ball(ArenaLayout.docked_ball_position(_layout, _paddle_x, _paddle_scale()), Vector2.ZERO)]
+	# A aposta volta a uma bola a cada encaixe: e uma decisao por lancamento, e
+	# nao um ajuste que fica ligado e drena vidas sem o jogador reparar.
+	_stake = 1
+	_sync_docked_balls()
 	_state = State.DOCKED
+
+
+## Teto de bolas apostaveis agora.
+##
+## Sai de min(vidas, teto de bolas), e essa forma carrega a regra inteira: cada
+## bola extra custa uma vida, entao apostar N gasta N-1 e sempre sobra pelo menos
+## uma. Com uma vida so o teto e 1, que e exatamente "nao da para apostar".
+func max_stake() -> int:
+	return ScoreRules.max_stake(GameState.lives, PowerUps.MAX_BALLS)
+
+
+## Alterna quantas bolas vao ao campo no proximo lancamento.
+##
+## Cicla e volta a 1 ao passar do teto, em vez de so incrementar: e uma tecla so,
+## reversivel, e serve igual para quem esta no toque.
+func cycle_stake() -> void:
+	if _state != State.DOCKED or _intro_timer > 0.0:
+		return
+
+	var limit := max_stake()
+	if limit <= 1:
+		# Com uma vida so nao ha o que apostar. Avisa em vez de ignorar em silencio.
+		Sfx.play("ui_back")
+		_message_sub = "SEM VIDA PARA APOSTAR"
+		return
+
+	_stake = 1 if _stake >= limit else _stake + 1
+	_sync_docked_balls()
+	Sfx.play("ui_confirm" if _stake > 1 else "ui_type")
+
+
+## Recria as bolas encaixadas, espalhadas sobre a raquete.
+func _sync_docked_balls() -> void:
+	var rect := ArenaLayout.paddle_rect(_layout, _paddle_x, _paddle_scale())
+	var base := ArenaLayout.docked_ball_position(_layout, _paddle_x, _paddle_scale())
+	_balls.clear()
+	for index in _stake:
+		_balls.append(_make_ball(Vector2(base.x + _stake_offset(index, rect), base.y), Vector2.ZERO))
+
+
+## Deslocamento horizontal da bola encaixada de indice "index".
+##
+## Existe como funcao propria porque o quadro de DOCKED reencaixa as bolas todo
+## quadro para acompanhar a raquete: sem o mesmo deslocamento nos dois lugares,
+## as bolas apostadas colapsariam no centro no quadro seguinte a aposta.
+func _stake_offset(index: int, paddle: Rect2) -> float:
+	if _stake <= 1:
+		return 0.0
+	var span := maxf(paddle.size.x - 18.0, 0.0)
+	return (float(index) / float(_stake - 1) - 0.5) * span
 
 
 func _make_ball(pos: Vector2, vel: Vector2) -> Dictionary:
@@ -228,12 +297,31 @@ func lowest_ball() -> Dictionary:
 func launch_ball() -> void:
 	if _state != State.DOCKED or _intro_timer > 0.0:
 		return
+
+	# AS VIDAS SAO COBRADAS AQUI, e nao na hora de escolher: ate soltar a bola da
+	# para voltar atras sem ter pago nada.
+	#
+	# Isto nunca zera as vidas, e a garantia esta em max_stake(): apostar N exige
+	# N vidas e gasta N-1. Sem esse invariante, uma aposta grande daria fim de
+	# partida no proprio lancamento.
+	var staked := _balls.size()
+	for _i in ScoreRules.stake_cost(staked):
+		GameState.lose_life()
+
 	var bias := clampf(_paddle_vx / 320.0, -1.0, 1.0)
 	for ball in _balls:
 		ball["vel"] = BallPhysics.launch_velocity(current_ball_speed(), bias)
+
 	_state = State.PLAYING
 	_message = ""
+	_message_sub = ""
 	Sfx.play("launch")
+	if staked > 1:
+		Sfx.play("stake")
+		_fx.popup(
+			ArenaLayout.docked_ball_position(_layout, _paddle_x, _paddle_scale()),
+			"%d BOLAS" % staked, Palette.TEXT_ACCENT, 2
+		)
 
 
 ## MULTIBOLA: divide cada bola em jogo, ate o teto de bolas simultaneas.
@@ -289,12 +377,19 @@ func _process(delta: float) -> void:
 	# expirando durante LOST e CLEARED, senao ele "congela" e volta inteiro.
 	_update_effects(delta)
 	_update_capsules(delta)
+	_update_movers(delta)
 	_update_spawn(delta)
 
 	match _state:
 		State.DOCKED:
-			for ball in _balls:
-				ball["pos"] = ArenaLayout.docked_ball_position(_layout, _paddle_x, _paddle_scale())
+			var docked_rect := ArenaLayout.paddle_rect(_layout, _paddle_x, _paddle_scale())
+			var docked_base := ArenaLayout.docked_ball_position(_layout, _paddle_x, _paddle_scale())
+			for index in _balls.size():
+				_balls[index]["pos"] = Vector2(
+					docked_base.x + _stake_offset(index, docked_rect), docked_base.y
+				)
+			if Input.is_action_just_pressed(InputSetup.STAKE):
+				cycle_stake()
 			if autopilot or Input.is_action_just_pressed(InputSetup.LAUNCH):
 				launch_ball()
 		State.PLAYING:
@@ -383,6 +478,8 @@ func _simulate_balls(delta: float) -> void:
 		for brick in _bricks:
 			if brick["alive"]:
 				_targets.append(brick)
+		for mover in _movers:
+			_targets.append(mover)
 
 		var result := BallPhysics.advance(ball["pos"], vel, radius, delta, play, _targets)
 		ball["pos"] = result["pos"]
@@ -423,7 +520,21 @@ func _handle_collision(event: Dictionary) -> void:
 			Sfx.play("paddle")
 			GameState.reset_combo()
 			_fx.spark(event["point"], Palette.PADDLE, Vector2.UP)
+		"solid":
+			# A barreira apenas rebate: nao tem hp, nao vale ponto, nao morre.
+			Sfx.play("wall", 1.15)
+			_fx.spark(event["point"], Palette.MOVER_EDGE, event["normal"])
+			_fx.shake(0.8)
 		"brick":
+			# A TRAVA E DE TIPO, NAO DE FAIXA.
+			#
+			# int() sobre String extrai digitos de qualquer posicao: int("solid:1")
+			# vale 1, e nao 0. Um id de texto passaria por qualquer checagem de
+			# faixa e viria parar num bloco real e arbitrario da parede, dando
+			# pontos e abrindo buraco em silencio. Barreira nenhuma pode chegar
+			# aqui - e se um dia chegar, para na porta.
+			if typeof(event["id"]) != TYPE_INT:
+				return
 			var id: int = int(event["id"])
 			if id >= 0 and id < _bricks.size():
 				_hit_brick(_bricks[id], event["point"])
@@ -637,6 +748,19 @@ func _update_capsules(delta: float) -> void:
 
 	for item in stepped["caught"]:
 		_collect(str(item))
+
+
+## Avanca as barreiras moveis da fase.
+##
+## Continuam patrulhando com a bola encaixada, para a fase ja se apresentar em
+## movimento antes do lancamento - o jogador ve o obstaculo e escolhe a hora de
+## soltar a bola. Param em LOST e CLEARED, onde a partida esta em suspenso.
+func _update_movers(delta: float) -> void:
+	if _movers.is_empty():
+		return
+	if _state != State.PLAYING and _state != State.DOCKED:
+		return
+	_movers = Movers.step(_movers, delta, _layout)
 
 
 ## Sorteia, avisa e materializa o bloco especial que surge durante a fase.
@@ -857,8 +981,14 @@ func _input(event: InputEvent) -> void:
 		# HUD (onde fica o botao de pause) ou nas bordas da pagina.
 		if button.pressed and button.button_index == MOUSE_BUTTON_LEFT:
 			var frame: Rect2 = _layout["frame"]
-			if frame.has_point(button.position):
-				launch_ball()
+			if not frame.has_point(button.position):
+				return
+			# O botao de aposta e testado ANTES do lancamento: ele fica dentro do
+			# campo, e sem esta ordem tocar nele soltaria a bola em vez de apostar.
+			if _state == State.DOCKED and _stake_button.has_point(button.position):
+				cycle_stake()
+				return
+			launch_ball()
 
 
 func _on_viewport_resized() -> void:
@@ -882,6 +1012,10 @@ func _on_viewport_resized() -> void:
 			ball["pos"] = ArenaLayout.docked_ball_position(_layout, _paddle_x, _paddle_scale())
 
 	_capsules = Capsules.remap(_capsules, old_play, new_play)
+
+	# A barreira guarda o percurso como fracao, entao girar a tela nao a teleporta:
+	# ela reaparece no mesmo ponto da patrulha, so que no campo novo.
+	_movers = Movers.remap(_movers, _layout)
 	_ghosts.clear()
 
 
@@ -900,6 +1034,7 @@ func _draw() -> void:
 		if brick["alive"]:
 			_draw_brick(brick)
 	_draw_haze()
+	_draw_movers()
 	_draw_pending_spawn()
 	_draw_capsules()
 	_draw_paddle()
@@ -907,6 +1042,7 @@ func _draw() -> void:
 	_draw_dark()
 	_draw_combo()
 	_draw_effects()
+	_draw_stake_button()
 	_draw_message()
 
 
@@ -1122,6 +1258,64 @@ func _draw_ball_at(pos: Vector2, color: Color) -> void:
 	draw_rect(Rect2(x + 2, y, 4, 8), color, true)
 	draw_rect(Rect2(x + 1, y + 1, 6, 6), color, true)
 	draw_rect(Rect2(x, y + 2, 8, 4), color, true)
+
+
+## Botao de aposta, logo acima da raquete enquanto a bola espera o lancamento.
+##
+## Some assim que a bola sai, e nao ha aposta a fazer no meio da jogada. O rotulo
+## diz o preco por extenso ("2 BOLAS -1 VIDA") em vez de so o numero: a mecanica
+## cobra vida, e cobrar sem dizer seria armadilha.
+func _draw_stake_button() -> void:
+	if _state != State.DOCKED or _intro_timer > 0.0:
+		_stake_button = Rect2()
+		return
+
+	var limit := max_stake()
+	if limit <= 1 and _stake <= 1:
+		# Com uma vida so nao ha oferta a fazer: o botao some em vez de ficar
+		# anunciando algo que o jogador nao pode aceitar.
+		_stake_button = Rect2()
+		return
+
+	# O rotulo diz o PRECO, nunca so o numero. E o rotulo de convite muda com o
+	# aparelho: "S" nao existe no celular, e mandar apertar uma tecla que nao
+	# esta la e pior que nao dizer nada.
+	var label := "TOQUE: +BOLA -1 VIDA" if _has_touch else "S: +BOLA -1 VIDA"
+	if _stake > 1:
+		label = "%d BOLAS * -%d VIDA" % [_stake, _stake - 1]
+
+	var text_w := PixelFont.text_width(label, 1)
+	var play := play_rect()
+	var size := Vector2(text_w + 14.0, PixelFont.text_height(1) + 8.0)
+	var paddle := ArenaLayout.paddle_rect(_layout, _paddle_x, _paddle_scale())
+	var x := clampf(paddle.get_center().x - size.x * 0.5, play.position.x + 4.0, play.end.x - size.x - 4.0)
+	_stake_button = Rect2(floorf(x), floorf(paddle.position.y - size.y - 12.0), size.x, size.y)
+
+	var hot := _stake > 1
+	draw_rect(_stake_button, Palette.FRAME_DARK, true)
+	draw_rect(_stake_button, Palette.TEXT_ACCENT if hot else Palette.FRAME_LIGHT, false, 1.0)
+	PixelFont.draw_text_centered(
+		self, _stake_button.get_center().x, _stake_button.position.y + 4.0,
+		label, 1, Palette.TEXT_ACCENT if hot else Palette.TEXT_DIM
+	)
+
+
+## Barreiras moveis: barra de aco com chanfro e duas garras nas pontas.
+##
+## As garras apontam para o lado em que a barra esta indo. Numa parede parada, o
+## unico jeito de ler a direcao seria acompanhar o movimento por um segundo; com
+## elas o jogador decide o desvio no quadro em que olha.
+func _draw_movers() -> void:
+	for mover in _movers:
+		var rect: Rect2 = mover["rect"]
+		draw_rect(rect, Palette.MOVER, true)
+		draw_rect(Rect2(rect.position, Vector2(rect.size.x, 1.0)), Palette.MOVER_EDGE, true)
+		draw_rect(Rect2(rect.position.x, rect.end.y - 1.0, rect.size.x, 1.0), Palette.FRAME_DARK, true)
+
+		var facing := 1.0 if float(mover["dir"]) >= 0.0 else -1.0
+		var claw := Vector2(2.0, maxf(rect.size.y - 2.0, 1.0))
+		var claw_x := rect.end.x - claw.x if facing > 0.0 else rect.position.x
+		draw_rect(Rect2(Vector2(claw_x, rect.position.y + 1.0), claw), Palette.MOVER_EDGE, true)
 
 
 ## Contorno piscando onde um bloco especial vai materializar. Nada aparece sem

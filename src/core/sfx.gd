@@ -120,6 +120,10 @@ func _build_streams() -> void:
 	# das capsulas quase identicas morreria. Quem revela o efeito e o popup.
 	_streams["capsule_catch"] = _tone(0.09, 520.0, 880.0, WAVE_SQUARE, 0.50, 0.5)
 
+	# Aposta paga no lancamento: varredura grave e curta, para soar como preco e
+	# nao como premio - o jogador acabou de trocar vida por cobertura de campo.
+	_streams["stake"] = _tone(0.16, 620.0, 190.0, WAVE_TRIANGLE, 0.50, 0.5)
+
 	_streams["ui_confirm"] = _sequence([
 		{"freq": 660.0, "duration": 0.05},
 		{"freq": 990.0, "duration": 0.08},

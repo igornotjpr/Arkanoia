@@ -158,6 +158,34 @@ const LEVELS := [
 	LEVEL_CHUVA,
 ]
 
+## Barreiras moveis por fase, em CELULAS da grade - nunca em pixels.
+##
+## Declarar em celula e o que faz a barreira sobreviver a rotacao de tela de graca,
+## do mesmo jeito que os blocos: quem converte para pixel e Movers.rect_for, a
+## partir do layout do momento.
+##
+## Toda barreira patrulha um trecho VAZIO do mapa. Nao e decoracao da regra: uma
+## barra sobreposta a um bloco deixaria a bola quicando entre os dois num espaco
+## menor que ela, e a resolucao por menor penetracao a expulsaria para um lado
+## imprevisivel. O teste confere celula por celula.
+##
+## A fase 1 nao tem barreira de proposito: e a parede que esta no ar desde a
+## v1.0.0, e a abertura do jogo continua sendo o Arkanoid classico.
+const MOVERS := {
+	2: [{"row": 4, "col_min": 2, "col_max": 8, "speed": 62.0, "t": 0.0}],
+	4: [{"row": 7, "col_min": 1, "col_max": 9, "speed": 74.0, "t": 0.5}],
+	5: [{"row": 4, "col_min": 2, "col_max": 4, "speed": 48.0, "t": 0.0}],
+}
+
+
+## Especificacoes das barreiras da fase, ja considerando a rotacao dos mapas.
+static func movers_for_level(level: int) -> Array:
+	if LEVELS.is_empty():
+		return []
+	var index := posmod(maxi(level, 1) - 1, LEVELS.size()) + 1
+	return MOVERS.get(index, [])
+
+
 ## Mensagem exibida ao limpar a parede - o easter egg juridico do TJ-PR.
 ## Fica aqui, e nao na Arena, para ser conteudo de fase testavel sem SceneTree.
 const CLEAR_MESSAGES: Array[String] = [

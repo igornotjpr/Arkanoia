@@ -4,12 +4,12 @@ Clone de Arkanoid em Godot 4.6, para embutir na seção secreta de jogos do proj
 de ferramentas do TJ-PR. Roda em navegador desktop e mobile, com leaderboard
 global no Supabase.
 
-**Seis fases com geometrias diferentes, gráficos e efeitos completos, lógica
-testada, e um cardápio de power-ups psicológicos** que embaralham a percepção do
-jogador sem nunca mexer na física. Tiros e barreiras móveis ficam para etapas
-seguintes.
+**Seis fases com geometrias diferentes, barreiras móveis, gráficos e efeitos
+completos, lógica testada, e um cardápio de power-ups psicológicos** que
+embaralham a percepção do jogador sem nunca mexer na física. Tiros e chefes ficam
+para etapas seguintes.
 
-Versão atual: **v2.3.0** — o que mudou em cada uma está em [CHANGELOG.md](CHANGELOG.md).
+Versão atual: **v2.4.0** — o que mudou em cada uma está em [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
@@ -19,6 +19,7 @@ Versão atual: **v2.3.0** — o que mudou em cada uma está em [CHANGELOG.md](CH
 |---|---|---|
 | Mover a raquete | mouse, ou `A`/`D`, ou `←`/`→` | arrastar o dedo |
 | Lançar a bola | clique, `W`, `↑` ou espaço | toque |
+| Apostar mais uma bola | `S` ou `↓` | botão acima da raquete |
 | Pause discreto | `P` ou `Esc` | ícone no canto do HUD |
 | Ligar/desligar som | `M` | `M` |
 
@@ -140,6 +141,39 @@ Dez blocos reforçados azuis desenham as letras **T** e **J** no meio da fase 1,
 os blocos dourados valem 200 pontos. Ao limpar a fase aparece uma mensagem
 rotativa (`AUTOS BAIXADOS`, `TRANSITADO EM JULGADO`, ...).
 
+### Barreiras móveis
+
+`ARCO`, `FORTALEZA` e `CORREDOR` têm barras de aço que patrulham um trecho vazio
+do mapa. Elas **rebatem e não quebram** — não têm hp, não valem ponto, não sofrem
+dano. A fase 1 não tem nenhuma: a abertura do jogo continua sendo o Arkanoid
+clássico.
+
+A física não mudou uma linha para isso. `BallPhysics.advance` relê `target["rect"]`
+a cada chamada e nunca guarda cache, então um alvo móvel já era só um alvo cujo
+retângulo mudou — o mesmo que a raquete faz desde a v1.0.0.
+
+O que exigiu cuidado foi o **id**. O tratamento de `"brick"` indexa a lista de
+blocos direto pelo id do evento, e `int()` sobre String extrai dígitos de qualquer
+posição: **`int("solid:1")` vale 1, não 0.** Uma barreira emitindo `"brick"`
+passaria por qualquer checagem de faixa e danificaria um bloco real e arbitrário
+da parede, em silêncio. Daí o `KIND_SOLID` com evento próprio, a trava por
+**tipo** em vez de faixa, e ids `String` para barreira contra `int` para bloco.
+
+A velocidade delas tem teto **derivado da física**, não escolhido a gosto: a
+colisão é resolvida por sobreposição discreta de menor penetração, e uma barra que
+ande mais que o sub-passo da bola (3 px) pode ejetá-la para o lado errado. O teste
+amarra `Movers.MAX_SPEED` a `BallPhysics.MAX_SUBSTEP_DISTANCE`, com folga de 2×.
+
+### Apostar bolas no lançamento
+
+Com a bola encaixada, `S` (ou o botão acima da raquete, no toque) alterna entre 1
+e `min(vidas, 6)` bolas. **Cada bola além da primeira custa uma vida**, cobrada só
+no lançamento — até soltar dá para voltar atrás. Com uma vida só, não há aposta.
+
+A troca se equilibra sem nenhuma constante de balanceamento: bater na raquete
+**zera o combo**, então mais bolas rendem combo pior, e o bônus de fase paga 500
+por vida restante. Você troca multiplicador e bônus por cobertura de campo.
+
 ---
 
 ## Arquitetura
@@ -154,6 +188,7 @@ src/core/               camada pura (sem nós, sem SceneTree) + autoloads
   power_ups.gd          catálogo dos itens e aritmética dos efeitos ativos
   capsules.gd           queda e coleta das cápsulas
   special_bricks.gd     surgimento do bloco especial e a regra da altura mínima
+  movers.gd             barreiras móveis: percurso, teto de velocidade, colisão
   nick_util.gd          sanitização do nick
   text_util.gd          formatação de data, placar e versão
   pixel_font.gd         fonte bitmap 5x7 gerada em runtime
@@ -222,7 +257,7 @@ godot --headless --path . -- --arkanoia-selftest
 > processamento, então com o relógio acelerado a chamada ao Supabase expira em
 > ~0,1 s reais e o teste do caminho HTTP fica inconclusivo (`TEMPO ESGOTADO`).
 
-**Suíte pura** (7432 asserções): layout nos quatro formatos e em **toda** grade
+**Suíte pura** (7696 asserções): layout nos quatro formatos e em **toda** grade
 permitida (5–16 colunas × 4–10 fileiras), física da bola (reflexão,
 antitunelamento, ângulo da raquete, componente vertical mínimo), construção das
 fases, pontuação, sanitização do nick, cobertura de glifos para **todo** texto
@@ -384,11 +419,10 @@ Ordem sugerida, do mais barato ao mais caro:
 1. **Mais fases**: acrescentar um mapa em `LevelBuilder.LEVELS`. É texto puro, de
    5×4 a 16×10, e a suíte valida a fase nova sozinha — inclusive rodando um soak
    completo nela nos dois formatos, que é o que pega um mapa inlimpável.
-2. **Barreiras móveis e lançamento múltiplo**: planejado. A física já aceita alvo
-   com retângulo móvel sem alteração nenhuma (`BallPhysics.advance` relê
-   `target["rect"]` a cada chamada), mas exige um `KIND_SOLID` com tipo de evento
-   próprio — id de texto num evento `"brick"` indexaria um bloco real, porque
-   `int("m1")` vale 1.
+2. **Chefes**: planejado, e o próximo marco MAJOR. Uma fase de chefe **não** pode
+   ser um campo vazio: `MIN_PADDLE_ANGLE` existe porque uma devolução quase
+   vertical achou uma coluna limpa e entrou em laço infinito, e sem parede o campo
+   inteiro é coluna limpa.
 3. **Laser**: a raquete atira. O `InputSetup.LAUNCH` já existe e não faz nada
    durante a partida, então é o gatilho natural.
 3. **Mais alucinações**: DELIRIO (o HUD mostra pontos e vidas errados), ECO (o

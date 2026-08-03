@@ -13,6 +13,16 @@ extends RefCounted
 const KIND_PADDLE := 1
 const KIND_BRICK := 2
 
+## Alvo solido que rebate a bola sem sofrer dano: a barreira movel.
+##
+## Emite evento "solid", e NAO "brick", e isso nao e preciosismo. Quem trata
+## "brick" indexa a lista de blocos direto pelo id do evento, e int() sobre String
+## extrai digitos de qualquer posicao - int("solid:1") vale 1, nao 0. Um id de
+## texto num evento "brick" passaria por qualquer checagem de faixa e danificaria
+## um bloco real e arbitrario da parede, dando pontos e abrindo buraco, em
+## silencio.
+const KIND_SOLID := 3
+
 ## Distancia maxima percorrida por sub-passo. Impede tunelamento: nenhum alvo do
 ## jogo tem lado menor que ~10 px, entao 3 px por passo mantem margem folgada.
 const MAX_SUBSTEP_DISTANCE := 3.0
@@ -41,11 +51,15 @@ const PADDLE_SPIN := 0.0011
 ## targets: Array de Dictionary com as chaves
 ##   "rect": Rect2         - area do alvo
 ##   "id":   Variant       - identificador devolvido nos eventos
-##   "kind": int           - KIND_PADDLE ou KIND_BRICK
+##   "kind": int           - KIND_PADDLE, KIND_BRICK ou KIND_SOLID
 ##   "vx":   float (opc.)  - velocidade horizontal, usada apenas pela raquete
 ##
+## O "rect" e relido a cada chamada e nunca guardado em cache, entao um alvo que
+## se move e so um alvo cujo retangulo mudou entre um quadro e outro - e por isso
+## que a barreira movel nao custou uma linha de fisica nova.
+##
 ## Retorna { pos, vel, events, lost }. Cada evento e
-##   { "type": "wall"|"paddle"|"brick", "id": Variant, "point": Vector2, "normal": Vector2 }
+##   { "type": "wall"|"paddle"|"brick"|"solid", "id": Variant, "point": Vector2, "normal": Vector2 }
 static func advance(pos: Vector2, vel: Vector2, radius: float, dt: float, bounds: Rect2, targets: Array) -> Dictionary:
 	var events: Array = []
 	var lost := false
@@ -104,7 +118,9 @@ static func advance(pos: Vector2, vel: Vector2, radius: float, dt: float, bounds
 					events.append({"type": "paddle", "id": id, "point": pos, "normal": Vector2.UP})
 			else:
 				vel = res["vel"]
-				events.append({"type": "brick", "id": id, "point": pos, "normal": res["normal"]})
+				var kind := int(target.get("kind", KIND_BRICK))
+				var kind_type := "solid" if kind == KIND_SOLID else "brick"
+				events.append({"type": kind_type, "id": id, "point": pos, "normal": res["normal"]})
 
 			resolved += 1
 			# No maximo dois contatos por sub-passo (ex.: quina entre dois blocos).

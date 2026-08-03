@@ -38,6 +38,11 @@ const SPAWN_TELEGRAPH := Color(0.941, 0.784, 0.282) # contorno do aviso previo
 const CAPSULE := Color(0.839, 0.796, 0.643)
 const CAPSULE_SIGIL := Color(0.180, 0.145, 0.106)
 
+## Barreira movel. Cinza de aco, sem cor de fileira e sem parentesco com bloco
+## nenhum: ela precisa ser lida na hora como "isto nao quebra, isto desvia".
+const MOVER := Color(0.522, 0.557, 0.639)
+const MOVER_EDGE := Color(0.851, 0.882, 0.949)
+
 ## Blocos fantasma (FANTASMA). Azul palido de luar, sem relacao com a cor que o
 ## bloco tinha vivo: a assombracao nao pode ser confundida com o que ainda esta
 ## la, so com a lembranca de que um dia esteve.

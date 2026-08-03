@@ -34,6 +34,7 @@ func _initialize() -> void:
 	_test_power_ups()
 	_test_capsules()
 	_test_special_bricks()
+	_test_movers()
 	_test_schema_mirror()
 	_test_gameplay_soak()
 
@@ -571,6 +572,8 @@ func _test_pixel_font() -> void:
 		"FIM DE JOGO", "NOVO RECORDE PESSOAL", "JOGAR DE NOVO", "MENU", "ENTER", "ESC",
 		"BOLA PERDIDA", "VIDA RESTANTE", "VIDAS RESTANTES", "FASE 1", "BONUS 1000",
 		"CLIQUE OU ESPACO PARA LANCAR", "TOQUE PARA LANCAR",
+		"S: +BOLA -1 VIDA", "TOQUE: +BOLA -1 VIDA", "2 BOLAS * -1 VIDA",
+		"6 BOLAS * -5 VIDA", "SEM VIDA PARA APOSTAR", "3 BOLAS",
 		"MOUSE OU A D MOVE * CLIQUE LANCA", "P PAUSA DISCRETO * M LIGA O SOM",
 		"ARRASTE MOVE * TOQUE LANCA", "TOQUE NO ICONE PAUSA * M LIGA O SOM",
 		"PONTUACAO ENVIADA", "MUITOS ENVIOS, AGUARDE", "SEM CONEXAO",
@@ -1078,6 +1081,179 @@ func _test_capsules() -> void:
 #  SpecialBricks
 # ============================================================================
 
+## Barreiras moveis e a aposta de bolas no lancamento.
+func _test_movers() -> void:
+	_begin("Movers")
+
+	var viewports := {
+		"paisagem": Vector2(640, 360),
+		"retrato": Vector2(640, 1385),
+		"ultrawide": Vector2(853, 360),
+		"quadrado": Vector2(700, 700),
+	}
+
+	# --- O TETO DE VELOCIDADE E DERIVADO DA FISICA ----------------------------
+	#
+	# A resolucao de colisao e por sobreposicao discreta de menor penetracao, nao
+	# por varredura. Uma barreira que ande mais que o sub-passo da bola pode
+	# surgir ja dentro dela e ejeta-la pelo eixo errado. Este teste e o que
+	# transforma esse raciocinio em contrato: mexer no teto sem mexer na fisica
+	# quebra aqui.
+	_check(Movers.MAX_SPEED / Movers.REFERENCE_FPS <= BallPhysics.MAX_SUBSTEP_DISTANCE,
+		"a barreira anda no maximo um sub-passo da bola por quadro (%.2f px)" % (
+			Movers.MAX_SPEED / Movers.REFERENCE_FPS))
+	_check(Movers.SAFETY_FACTOR <= 0.5, "o teto guarda folga de pelo menos 2x")
+
+	# Nenhuma barreira declarada pode pedir mais que o teto.
+	for level in range(1, LevelBuilder.level_count() + 1):
+		for spec in LevelBuilder.movers_for_level(level):
+			_check(float(spec.get("speed", 0.0)) <= Movers.MAX_SPEED,
+				"fase %d: barreira a %.0f px/s respeita o teto de %.0f" % [
+					level, float(spec.get("speed", 0.0)), Movers.MAX_SPEED])
+
+	# --- ID NUNCA E int -------------------------------------------------------
+	#
+	# Esta e a defesa estrutural contra o pior bug que a barreira poderia causar.
+	# int() sobre String extrai digitos de qualquer posicao, entao um id de texto
+	# num evento "brick" indexaria um bloco real da parede. Enquanto todo id de
+	# barreira for String e todo id de bloco for int, os dois namespaces nao se
+	# encostam - e o Dictionary do Godot separa 3 de "3".
+	_eq(int("solid:1"), 1, "int(\"solid:1\") vale 1, e NAO 0 - a razao da trava de tipo")
+	var mixed := {}
+	mixed[3] = "bloco"
+	mixed["3"] = "barreira"
+	_eq(mixed.size(), 2, "o Dictionary separa a chave 3 da chave \"3\"")
+
+	for label in viewports:
+		var layout := ArenaLayout.compute(viewports[label], 11, 8)
+		var specs := [
+			{"row": 4, "col_min": 2, "col_max": 8, "speed": 62.0, "t": 0.0},
+			{"row": 6, "col_min": 1, "col_max": 9, "speed": 40.0, "t": 0.5},
+		]
+		var movers := Movers.build(specs, layout)
+		_eq(movers.size(), 2, "%s: build devolve uma barreira por especificacao" % label)
+
+		for mover in movers:
+			_check(typeof(mover["id"]) == TYPE_STRING, "%s: id da barreira e String" % label)
+			_eq(int(mover["kind"]), BallPhysics.KIND_SOLID, "%s: barreira e KIND_SOLID" % label)
+
+		# --- Fica dentro do trecho, e longe da raquete ------------------------
+		var play: Rect2 = layout["play"]
+		var paddle_y := float(layout["paddle_y"])
+		var dt := 1.0 / 60.0
+		var seen_left := false
+		var seen_right := false
+
+		# 20 s de patrulha, conferidos quadro a quadro. As violacoes viram um
+		# booleano em vez de uma assercao por quadro: o invariante e o mesmo, mas
+		# o placar da suite continua significando "quantas coisas eu verifico", e
+		# nao "quantos quadros eu simulei".
+		var left_span := true
+		var inside_play := true
+		var above_paddle := true
+
+		for _frame in 1200:
+			movers = Movers.step(movers, dt, layout)
+			for mover in movers:
+				var rect: Rect2 = mover["rect"]
+				var first := ArenaLayout.brick_rect(layout, int(mover["col_min"]), int(mover["row"]))
+				var last := ArenaLayout.brick_rect(layout, int(mover["col_max"]), int(mover["row"]))
+
+				if rect.position.x < first.position.x - EPS or rect.end.x > last.end.x + EPS:
+					left_span = false
+				if not play.encloses(rect):
+					inside_play = false
+				if rect.end.y >= paddle_y:
+					above_paddle = false
+
+				var t := float(mover["t"])
+				if t <= 0.001:
+					seen_left = true
+				if t >= 0.999:
+					seen_right = true
+
+		_check(left_span, "%s: barreira nunca sai do trecho que patrulha" % label)
+		_check(inside_play, "%s: barreira nunca sai do campo" % label)
+		# NUNCA na faixa da raquete: a barreira nao pode roubar a jogada de
+		# defesa nem prender a bola contra a raquete.
+		_check(above_paddle, "%s: barreira fica sempre acima da raquete" % label)
+		_check(seen_left and seen_right, "%s: a barreira percorre o trecho inteiro nos dois sentidos" % label)
+
+		# Um passo grande nao teleporta a barreira para fora: t satura em 0 e 1.
+		movers = Movers.step(movers, 10.0, layout)
+		for mover in movers:
+			var t := float(mover["t"])
+			_check(t >= 0.0 and t <= 1.0, "%s: t continua entre 0 e 1 apos um quadro enorme" % label)
+
+	# --- O percurso sobrevive ao giro de tela ---------------------------------
+	var land := ArenaLayout.compute(Vector2(640, 360), 11, 8)
+	var port := ArenaLayout.compute(Vector2(640, 1385), 11, 8)
+	var travelling := Movers.build([{"row": 4, "col_min": 2, "col_max": 8, "speed": 62.0, "t": 0.0}], land)
+	travelling = Movers.step(travelling, 1.3, land)
+	var before := float(travelling[0]["t"])
+	var rect_before: Rect2 = travelling[0]["rect"]
+	travelling = Movers.remap(travelling, port)
+	_approx(float(travelling[0]["t"]), before, EPS, "girar a tela preserva a fracao do percurso")
+	_check(Rect2(travelling[0]["rect"]) != rect_before, "mas o retangulo acompanha o campo novo")
+
+	# --- TODA BARREIRA PATRULHA VAO VAZIO -------------------------------------
+	#
+	# Sobreposta a um bloco, a barra deixaria a bola quicando entre os dois num
+	# espaco menor que ela, e a resolucao por menor penetracao a expulsaria para
+	# um lado imprevisivel. Conferido celula por celula, no mapa de verdade.
+	for level in range(1, LevelBuilder.level_count() + 1):
+		var map := LevelBuilder.map_for_level(level)
+		for spec in LevelBuilder.movers_for_level(level):
+			var row := int(spec["row"])
+			_check(row >= 0 and row < map.size(), "fase %d: barreira dentro do mapa" % level)
+			var line := String(map[row])
+			for col in range(int(spec["col_min"]), int(spec["col_max"]) + 1):
+				_check(col >= 0 and col < line.length(),
+					"fase %d: coluna %d existe no mapa" % [level, col])
+				_eq(line[col], ".",
+					"fase %d: celula (%d,%d) do percurso esta vazia" % [level, col, row])
+
+	# --- Evento "solid", nunca "brick" ----------------------------------------
+	var bounds := Rect2(0, 0, 400, 400)
+	var solid := {"rect": Rect2(180, 100, 60, 8), "id": "solid:0", "kind": BallPhysics.KIND_SOLID}
+	var hit := BallPhysics.advance(Vector2(200, 130), Vector2(0, -300), 4.0, 0.12, bounds, [solid])
+	var types: Array = []
+	for event in hit["events"]:
+		types.append(str(event["type"]))
+	_check(types.has("solid"), "bater na barreira produz evento solid")
+	_check(not types.has("brick"), "bater na barreira NUNCA produz evento brick")
+	_check(Vector2(hit["vel"]).y > 0.0, "a barreira devolve a bola para baixo")
+
+	# O mesmo alvo com kind de bloco continua produzindo "brick": o tipo do
+	# evento sai do kind, e nao do formato do id.
+	var as_brick := {"rect": Rect2(180, 100, 60, 8), "id": 7, "kind": BallPhysics.KIND_BRICK}
+	var brick_hit := BallPhysics.advance(Vector2(200, 130), Vector2(0, -300), 4.0, 0.12, bounds, [as_brick])
+	var brick_types: Array = []
+	for event in brick_hit["events"]:
+		brick_types.append(str(event["type"]))
+	_check(brick_types.has("brick"), "um alvo KIND_BRICK continua produzindo evento brick")
+
+	# --- Aposta de bolas ------------------------------------------------------
+	#
+	# O invariante que impede o lancamento de encerrar a partida: apostar N custa
+	# N-1, e o teto garante que sempre sobra vida.
+	# Comeca em 1 vida: com 0 a partida ja acabou e a bola nunca chega a encaixar
+	# (_on_ball_lost vai direto para OVER), entao apostar com 0 e inalcancavel.
+	for lives in range(1, ScoreRules.MAX_LIVES + 2):
+		var limit := ScoreRules.max_stake(lives, PowerUps.MAX_BALLS)
+		_check(limit >= 1, "com %d vidas ainda da para lancar uma bola" % lives)
+		_check(limit <= PowerUps.MAX_BALLS, "a aposta respeita o teto de bolas")
+		for stake in range(1, limit + 1):
+			var cost := ScoreRules.stake_cost(stake)
+			_eq(cost, stake - 1, "apostar %d bolas custa %d vidas" % [stake, stake - 1])
+			_check(lives - cost >= 1,
+				"com %d vidas, apostar %d deixa %d - nunca zera no lancamento" % [
+					lives, stake, lives - cost])
+
+	_eq(ScoreRules.max_stake(1, PowerUps.MAX_BALLS), 1, "com uma vida so nao da para apostar")
+	_eq(ScoreRules.stake_cost(1), 0, "lancar uma bola e de graca")
+
+
 func _test_special_bricks() -> void:
 	_begin("SpecialBricks")
 
@@ -1442,9 +1618,19 @@ func _test_gameplay_soak() -> void:
 			_check(int(run["score"]) <= ScoreRules.plausible_ceiling(seconds),
 				"%s: %d pontos em %ds passa no CHECK do schema" % [tag, int(run["score"]), seconds])
 
-			print("    fase %d %dx%d/%s: %d pontos, %.1fs, %d blocos" % [
+			# Numa fase com barreira, a bola TEM que bater nela - senao a fase
+			# limpa por um caminho que nunca passa pelo obstaculo, e todo o resto
+			# deste bloco estaria provando o comportamento de uma barra decorativa.
+			var has_movers := not LevelBuilder.movers_for_level(level).is_empty()
+			if has_movers:
+				_check(int(run["solid_hits"]) > 0,
+					"%s: a bola bateu na barreira %d vezes" % [tag, int(run["solid_hits"])])
+			else:
+				_eq(int(run["solid_hits"]), 0, "%s: fase sem barreira nao produz evento solid" % tag)
+
+			print("    fase %d %dx%d/%s: %d pontos, %.1fs, %d blocos, %d batidas na barreira" % [
 				level, dims.x, dims.y, label, int(run["score"]), float(run["elapsed"]),
-				LevelBuilder.build(level).size()
+				LevelBuilder.build(level).size(), int(run["solid_hits"])
 			])
 
 
@@ -1500,6 +1686,11 @@ func _simulate_run(viewport: Vector2, max_seconds: float, seed_value: int = 0,
 	var specials := 0
 	var special_alive := 0
 	var spawn_timer := SpecialBricks.next_interval(rng)
+
+	# As barreiras entram no soak pelo mesmo motivo que todo o resto: e aqui que
+	# se prova que uma barra andando no meio da parede nao prende nem ejeta a bola.
+	var movers := Movers.build(LevelBuilder.movers_for_level(level), layout)
+	var solid_hits := 0
 	var pending: Dictionary = {}
 
 	var capsule_speed := Capsules.speed(layout)
@@ -1522,6 +1713,7 @@ func _simulate_run(viewport: Vector2, max_seconds: float, seed_value: int = 0,
 	var paddle_max_speed := 900.0 * speed_scale
 
 	while elapsed < max_seconds and alive > 0:
+		movers = Movers.step(movers, dt, layout)
 		effects = PowerUps.tick(effects, dt)["active"]
 		if not forced.is_empty():
 			effects[forced] = 999.0
@@ -1580,6 +1772,8 @@ func _simulate_run(viewport: Vector2, max_seconds: float, seed_value: int = 0,
 			for brick in bricks:
 				if brick["alive"]:
 					targets.append(brick)
+			for mover in movers:
+				targets.append(mover)
 
 			var result := BallPhysics.advance(ball["pos"], vel, radius, dt, play, targets)
 			ball["pos"] = result["pos"]
@@ -1590,6 +1784,9 @@ func _simulate_run(viewport: Vector2, max_seconds: float, seed_value: int = 0,
 					"paddle":
 						paddle_hits += 1
 						combo = 0
+					"solid":
+						# A barreira so rebate: nao tira hp, nao pontua, nao morre.
+						solid_hits += 1
 					"brick":
 						var brick: Dictionary = bricks[int(event["id"])]
 						brick["hp"] = int(brick["hp"]) - 1
@@ -1699,6 +1896,7 @@ func _simulate_run(viewport: Vector2, max_seconds: float, seed_value: int = 0,
 		"paddle_hits": paddle_hits,
 		"max_combo": max_combo,
 		"in_bounds": in_bounds,
+		"solid_hits": solid_hits,
 		"caught": caught,
 		"specials": specials,
 		"max_balls": max_balls,

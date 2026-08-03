@@ -9,6 +9,10 @@ extends RefCounted
 const LEFT := &"arkanoia_left"
 const RIGHT := &"arkanoia_right"
 const LAUNCH := &"arkanoia_launch"
+
+## Aposta mais uma bola no lancamento. Fica em S e na seta para baixo por
+## simetria com o LAUNCH (W e seta para cima): sobe lanca, desce aposta.
+const STAKE := &"arkanoia_stake"
 const PAUSE := &"arkanoia_pause"
 const CONFIRM := &"arkanoia_confirm"
 
@@ -17,6 +21,7 @@ const BINDINGS := {
 	LEFT: [KEY_A, KEY_LEFT],
 	RIGHT: [KEY_D, KEY_RIGHT],
 	LAUNCH: [KEY_W, KEY_UP, KEY_SPACE],
+	STAKE: [KEY_S, KEY_DOWN],
 	PAUSE: [KEY_P, KEY_ESCAPE],
 	CONFIRM: [KEY_ENTER, KEY_KP_ENTER],
 }

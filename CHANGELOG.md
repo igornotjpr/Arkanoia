@@ -19,6 +19,58 @@ git log v1.0.0..v1.1.0     # tudo que entrou entre as duas
 
 ---
 
+## v2.4.0 — 01/08/2026
+
+Barreiras móveis, e a opção de apostar vidas em bolas extras.
+
+### Adicionado
+
+- **Barreiras móveis** (`src/core/movers.gd`). Barras de aço que patrulham um
+  trecho vazio da fase e rebatem a bola sem sofrer dano. Estão em `ARCO`,
+  `FORTALEZA` e `CORREDOR`; a fase 1 continua sem nenhuma, de propósito.
+- **`BallPhysics.KIND_SOLID`**, com tipo de evento `"solid"` próprio.
+- **Lançamento múltiplo.** Com a bola encaixada, `S` (ou a seta para baixo, ou o
+  botão no campo) alterna entre 1 e `min(vidas, 6)` bolas. Cada bola além da
+  primeira custa uma vida, **cobrada só no lançamento** — até soltar dá para
+  voltar atrás.
+
+### A física não mudou uma linha
+
+`BallPhysics.advance` relê `target["rect"]` a cada chamada e nunca guarda cache,
+então um alvo que se move já era só um alvo cujo retângulo mudou — exatamente o
+que a Arena fazia com a raquete desde a v1.0.0.
+
+O que **precisou** de cuidado foi o id. O tratamento de `"brick"` indexa a lista
+de blocos direto pelo id do evento, e `int()` sobre String extrai dígitos de
+qualquer posição: **`int("solid:1")` vale 1, não 0.** Uma barreira emitindo
+evento `"brick"` passaria por qualquer checagem de faixa e danificaria um bloco
+real e arbitrário da parede, dando pontos e abrindo buraco, em silêncio. Por isso
+o tipo de evento é próprio e a trava passou a ser de **tipo**, não de faixa.
+
+Blocos usam id `int`, barreiras usam `String`, e o Dictionary do Godot separa `3`
+de `"3"` — os dois namespaces não têm como se encostar.
+
+### Por que a aposta se equilibra sozinha
+
+Não há constante nova de balanceamento, e não precisa haver. Bater na raquete
+**zera o combo**, então mais bolas significa combo pior; e `level_clear_bonus`
+paga 500 por vida restante. Você troca multiplicador e bônus por cobertura de
+campo. `ScoreRules.max_stake` garante que apostar N exige N vidas e gasta N−1, o
+que impede o lançamento de encerrar a própria partida.
+
+### Testes
+
+- O teto de velocidade da barreira é **derivado da física**, não escolhido: a
+  resolução é por sobreposição discreta, então uma barra que ande mais que o
+  sub-passo da bola (3 px) pode ejetá-la. O teste amarra `Movers.MAX_SPEED` a
+  `BallPhysics.MAX_SUBSTEP_DISTANCE`.
+- Toda barreira patrulha vão **vazio**, conferido célula por célula no mapa real.
+- Nenhum id de barreira é `int`, e nenhuma delas encosta na faixa da raquete.
+- O soak passou a incluir as barreiras: as fases com barra são limpas com a bola
+  batendo nela de 13 a 34 vezes por partida, sem prender e sem escapar do campo.
+
+---
+
 ## v2.3.0 — 01/08/2026
 
 O jogo deixou de ser uma fase só.

@@ -11,6 +11,24 @@ const COMBO_MAX := 4.0
 const STARTING_LIVES := 3
 const MAX_LIVES := 5
 
+
+## Quantas bolas o jogador pode apostar num lancamento, dadas as vidas que tem.
+##
+## Mora aqui, e nao na Arena, porque carrega um invariante de seguranca que
+## merece prova: apostar N custa N-1 vidas, entao o teto min(vidas, bolas)
+## garante que SOBRA pelo menos uma vida depois de pagar. Sem isso, uma aposta
+## grande daria fim de partida no proprio lancamento - a bola sairia da raquete e
+## a corrida ja estaria encerrada.
+##
+## Com uma vida so o teto e 1, que e exatamente "nao da para apostar".
+static func max_stake(lives: int, ball_cap: int) -> int:
+	return clampi(mini(lives, ball_cap), 1, maxi(ball_cap, 1))
+
+
+## Vidas cobradas por uma aposta de "stake" bolas.
+static func stake_cost(stake: int) -> int:
+	return maxi(stake - 1, 0)
+
 const LIFE_BONUS := 500
 const LEVEL_CLEAR_BONUS := 1000
 
